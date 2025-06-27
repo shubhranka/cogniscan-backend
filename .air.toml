@@ -1,0 +1,51 @@
+# .air.toml
+# Config file for air: https://github.com/cosmtrek/air
+
+# The root directory of your project. "." means the directory where .air.toml is located.
+root = "."
+# A temporary directory for the built binary.
+tmp_dir = "tmp"
+
+[build]
+# The command to build your application.
+# We are building the main.go from the cmd/server directory and outputting it to the tmp directory.
+cmd = "go build -o ./tmp/main ./cmd/server/main.go"
+# The path to the binary to run. This must match the output of the cmd above.
+bin = "tmp/main"
+
+# A command that will be executed every time before the build.
+pre_cmd = []
+# A command that will be executed every time after the build.
+post_cmd = []
+
+# File extensions to watch.
+include_ext = ["go", "tpl", "tmpl", "html"]
+# Directories to exclude from watching. We must exclude tmp_dir to prevent a build loop.
+exclude_dir = ["assets", "tmp", "vendor"]
+# Files and directories to watch.
+include_dir = []
+# Specific files to watch.
+include_file = []
+# Files to exclude from watching.
+exclude_file = []
+# Regex patterns to exclude from watching.
+exclude_regex = ["_test.go"]
+# Directories to watch recursively.
+follow_symlink = true
+
+[log]
+# Show log time.
+time = true
+# Only show the main process's log.
+main_only = false
+
+[color]
+# Customize colors.
+main = "magenta"
+watcher = "cyan"
+build = "yellow"
+runner = "green"
+
+[misc]
+# Delay in milliseconds to kill the running process after a file change.
+kill_delay = 500
