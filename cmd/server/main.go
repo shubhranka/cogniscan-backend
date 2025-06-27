@@ -53,6 +53,10 @@ func main() {
 	}
 
 	router := gin.Default()
+
+	// Health Route
+	router.GET("/health", handlers.HealthCheck)
+
 	api := router.Group("/api/v1")
 	{
 		protected := api.Group("/").Use(middleware.AuthMiddleware(authClient))
