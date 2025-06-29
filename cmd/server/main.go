@@ -23,22 +23,28 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, relying on environment variables")
 	}
+
+	// Initialize Database
 	database.ConnectDB()
-	if err := services.InitMegaService(); err != nil {
-		log.Fatalf("Failed to initialize MEGA Service: %v", err)
+
+	// Initialize Google Drive Service
+	if err := services.InitDriveService(); err != nil {
+		log.Fatalf("Failed to initialize Drive Service: %v", err)
 	}
+
+	// Initialize Firebase Admin SDK from Environment Variable
 	ctx := context.Background()
 	keyDataString := os.Getenv("KEY_DATA")
 	if keyDataString == "" {
 		log.Fatal("KEY_DATA environment variable not set")
 	}
-	var keyData map[string]interface{}
-	err := json.Unmarshal([]byte(keyDataString), &keyData)
+	var parsedKeyData map[string]interface{}
+	err := json.Unmarshal([]byte(keyDataString), &parsedKeyData)
 	if err != nil {
 		log.Fatalf("error unmarshalling key data: %v\n", err)
 	}
-	keyData["private_key"] = strings.ReplaceAll(keyData["private_key"].(string), "\\n", "\n")
-	parsedKeyDataString, err := json.Marshal(keyData)
+	parsedKeyData["private_key"] = strings.ReplaceAll(parsedKeyData["private_key"].(string), "\\n", "\n")
+	parsedKeyDataString, err := json.Marshal(parsedKeyData)
 	if err != nil {
 		log.Fatalf("error marshalling key data: %v\n", err)
 	}
@@ -52,9 +58,8 @@ func main() {
 		log.Fatalf("error getting Auth client: %v\n", err)
 	}
 
+	// Initialize Gin Router
 	router := gin.Default()
-
-	// Health Route
 	router.GET("/health", handlers.HealthCheck)
 
 	api := router.Group("/api/v1")
@@ -73,6 +78,7 @@ func main() {
 			protected.PUT("/notes/:id", handlers.UpdateNote)
 			protected.DELETE("/notes/:id", handlers.DeleteNote)
 			protected.GET("/notes/:id/image", handlers.GetNoteImage)
+			// The /notes/:id/image route has been removed as it's no longer needed
 
 			// SEARCH ROUTE
 			protected.GET("/search", handlers.SearchItems)

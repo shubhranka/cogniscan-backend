@@ -12,6 +12,7 @@ import (
 	"cogniscan/backend/internal/database"
 	"cogniscan/backend/internal/middleware"
 	"cogniscan/backend/internal/models"
+	"cogniscan/backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
@@ -162,10 +163,30 @@ func deleteFolderRecursively(ctx context.Context, parentIDHex, ownerID string) e
 	foldersCollection := database.Client.Database(dbName).Collection("folders")
 	notesCollection := database.Client.Database(dbName).Collection("notes")
 
-	log.Printf("Deleting notes in folder %s from database. MEGA files will be orphaned.", parentIDHex)
+	// Find all notes in the current folder to delete them
+	noteCursor, err := notesCollection.Find(ctx, bson.M{"folderId": parentIDHex, "ownerId": ownerID})
+	if err != nil {
+		return err
+	}
+	defer noteCursor.Close(ctx)
+
+	for noteCursor.Next(ctx) {
+		var noteToDelete models.Note
+		if err := noteCursor.Decode(&noteToDelete); err != nil {
+			log.Printf("Could not decode note for Drive deletion: %v", err)
+			continue
+		}
+		// Delete from Google Drive
+		if noteToDelete.DriveID != "" {
+			err := services.DeleteFile(noteToDelete.DriveID)
+			if err != nil {
+				log.Printf("Failed to delete file from Drive: %v", err)
+			}
+		}
+	}
 
 	// Delete all notes records from MongoDB for this folder
-	_, err := notesCollection.DeleteMany(ctx, bson.M{"folderId": parentIDHex, "ownerId": ownerID})
+	_, err = notesCollection.DeleteMany(ctx, bson.M{"folderId": parentIDHex, "ownerId": ownerID})
 	if err != nil {
 		return fmt.Errorf("failed to delete notes from db for folder %s: %v", parentIDHex, err)
 	}

@@ -1,3 +1,4 @@
+// ./cogniscan-backend/internal/models/models.go
 package models
 
 import (
@@ -6,8 +7,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// User represents a user in our system.
-// In a real system, you might store more info.
 type User struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty"`
 	Email     string             `bson:"email"`
@@ -18,22 +17,22 @@ type User struct {
 	UpdatedAt time.Time          `bson:"updatedAt"`
 }
 
-// Folder represents the folder structure in MongoDB
 type Folder struct {
-	ID   primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name string             `bson:"name" json:"name"`
-	// Use string for ParentID. "" means it's a root folder.
-	ParentID string `bson:"parentId" json:"parentId"`
-	OwnerID  string `bson:"ownerId" json:"ownerId"` // Storing Firebase UID as string
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name      string             `bson:"name" json:"name"`
+	ParentID  string             `bson:"parentId" json:"parentId"`
+	OwnerID   string             `bson:"ownerId" json:"ownerId"`
+	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
 
-// Note represents a scanned note in MongoDB
 type Note struct {
-	ID primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	// We'll add a 'name' field for display purposes
-	Name      string    `bson:"name" json:"name"`
-	MegaURL   string    `bson:"megaUrl" json:"megaUrl"`
-	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
-	FolderID  string    `bson:"folderId" json:"folderId"`
-	OwnerID   string    `bson:"ownerId" json:"ownerId"`
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name      string             `bson:"name" json:"name"`
+	PublicURL string             `bson:"publicUrl" json:"publicUrl"`
+	DriveID   string             `bson:"driveId" json:"driveId"`
+	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time          `bson:"updatedAt" json:"updatedAt"`
+	FolderID  string             `bson:"folderId" json:"folderId"`
+	OwnerID   string             `bson:"ownerId" json:"ownerId"`
 }

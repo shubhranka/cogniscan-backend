@@ -104,7 +104,6 @@ func SearchItems(c *gin.Context) {
 					Type:      "note",
 					ID:        n.ID.Hex(),
 					Name:      n.Name,
-					MegaURL:   n.MegaURL,
 					FolderID:  n.FolderID,
 					CreatedAt: n.CreatedAt,
 				})
