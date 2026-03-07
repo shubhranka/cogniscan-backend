@@ -27,6 +27,19 @@ func main() {
 	// Initialize Database
 	database.ConnectDB()
 
+	// Check if token.json exists, if not create it
+	if _, err := os.Stat("token.json"); os.IsNotExist(err) {
+		token := os.Getenv("COGNI_GOOGLE_TOKEN")
+		if token == "" {
+			log.Println("COGNI_GOOGLE_TOKEN environment variable not set")
+			return
+		}
+		err := os.WriteFile("token.json", []byte(token), 0644)
+		if err != nil {
+			log.Fatalf("error writing token.json: %v\n", err)
+		}
+	}
+
 	// Initialize Google Drive Service
 	if err := services.InitDriveService(); err != nil {
 		log.Fatalf("Failed to initialize Drive Service: %v", err)
