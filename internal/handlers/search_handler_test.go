@@ -181,6 +181,9 @@ func TestSearchItems(t *testing.T) {
 			wantStatus:     http.StatusOK,
 			wantMinResults: 3,
 			wantMaxResults: 3,
+			expectedFolderIDs: []string{
+				testFolders[0].ID.Hex(), // "Important Documents" folder
+			},
 		},
 	}
 
@@ -399,9 +402,6 @@ func TestSearchItems_Structure(t *testing.T) {
 
 		// Note-specific fields
 		if result.Type == "note" {
-			if result.Caption == "" {
-				// Empty is valid for notes without captions
-			}
 			if result.FolderID == "" {
 				t.Error("Note result is missing FolderID field")
 			}

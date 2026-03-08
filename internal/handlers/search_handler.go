@@ -22,7 +22,6 @@ type SearchResultItem struct {
 	Type      string    `json:"type"`
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	Caption   string    `json:"caption,omitempty"` // NEW FIELD for notes
 	ParentID  string    `json:"parentId,omitempty"` // For folders
 	MegaURL   string    `json:"megaUrl,omitempty"`  // For notes
 	FolderID  string    `json:"folderId,omitempty"` // For notes
@@ -108,7 +107,6 @@ func SearchItems(c *gin.Context) {
 					Type:      "note",
 					ID:        n.ID.Hex(),
 					Name:      n.Name,
-					Caption:   n.Caption,
 					FolderID:  n.FolderID,
 					CreatedAt: n.CreatedAt,
 				})
