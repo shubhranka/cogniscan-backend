@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"cogniscan/backend/internal/database"
 	"cogniscan/backend/internal/handlers"
 	"cogniscan/backend/internal/middleware"
 	"cogniscan/backend/internal/services"
+	"cogniscan/backend/internal/workers"
 
 	firebase "firebase.google.com/go/v4"
 	"github.com/gin-gonic/gin"
@@ -51,8 +53,20 @@ func main() {
 		// Continue without AI service - graceful degradation
 	}
 
+	// Initialize Vector Service for embedding storage
+	if err := services.InitVectorService(); err != nil {
+		log.Printf("Warning: Failed to initialize Vector Service: %v", err)
+		// Continue without vector service - vector search will be disabled
+	}
+
+	// Initialize Queue Service for background workers
+	if err := services.InitQueueService(); err != nil {
+		log.Printf("Warning: Failed to initialize Queue Service: %v", err)
+		// Continue without queue service - caption generation will be disabled
+	}
+
 	// Initialize Firebase Admin SDK from Environment Variable
-	ctx := context.Background()
+	mainCtx := context.Background()
 	keyDataString := os.Getenv("KEY_DATA")
 	if keyDataString == "" {
 		log.Fatal("KEY_DATA environment variable not set")
@@ -68,14 +82,25 @@ func main() {
 		log.Fatalf("error marshalling key data: %v\n", err)
 	}
 	opt := option.WithCredentialsJSON(parsedKeyDataString)
-	app, err := firebase.NewApp(ctx, nil, opt)
+	app, err := firebase.NewApp(mainCtx, nil, opt)
 	if err != nil {
 		log.Fatalf("error initializing app: %v\n", err)
 	}
-	authClient, err := app.Auth(ctx)
+	authClient, err := app.Auth(mainCtx)
 	if err != nil {
 		log.Fatalf("error getting Auth client: %v\n", err)
 	}
+
+	// Start caption workers
+	workerCount := 3
+	if wc := os.Getenv("CAPTION_WORKER_COUNT"); wc != "" {
+		if n, err := strconv.Atoi(wc); err == nil && n > 0 {
+			workerCount = n
+		}
+	}
+	workers.StartCaptionWorker(mainCtx, workerCount)
+
+	log.Printf("[Main] Caption workers started with count: %d", workerCount)
 
 	// Initialize Gin Router
 	router := gin.Default()

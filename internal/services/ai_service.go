@@ -71,3 +71,76 @@ func GenerateCaption(imageBytes []byte) (string, error) {
 
 	return completion.Choices[0].Message.Content, nil
 }
+
+// GenerateEmbedding generates an embedding vector for the given text using NVIDIA's llama-nemotron-embed-1b-v2
+// Uses "passage" input_type for storing captions in the database
+func GenerateEmbedding(text string) ([]float32, error) {
+	if !isClientInitialized() {
+		return nil, fmt.Errorf("AI client not initialized")
+	}
+
+	ctx := context.Background()
+
+	// Call the embeddings API with NVIDIA's embedding model
+	// input_type is required for asymmetric models: "query" for search queries, "passage" for storing
+	embedding, err := aiClient.Embeddings.New(ctx, openai.EmbeddingNewParams{
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfArrayOfStrings: []string{text},
+		},
+		Model: openai.EmbeddingModel("nvidia/llama-nemotron-embed-1b-v2"),
+	}, option.WithJSONSet("input_type", "passage"), option.WithJSONSet("truncate", "NONE"))
+
+	if err != nil {
+		log.Printf("[AIService] Failed to generate embedding: %v", err)
+		return nil, err
+	}
+
+	if len(embedding.Data) == 0 {
+		return nil, fmt.Errorf("no embedding data returned from AI model")
+	}
+
+	// Convert []float64 to []float32
+	vec := embedding.Data[0].Embedding
+	result := make([]float32, len(vec))
+	for i, v := range vec {
+		result[i] = float32(v)
+	}
+
+	return result, nil
+}
+
+// GenerateQueryEmbedding generates an embedding vector for a search query using NVIDIA's llama-nemotron-embed-1b-v2
+// Uses "query" input_type for searching against stored document embeddings
+func GenerateQueryEmbedding(text string) ([]float32, error) {
+	if !isClientInitialized() {
+		return nil, fmt.Errorf("AI client not initialized")
+	}
+
+	ctx := context.Background()
+
+	// Call the embeddings API with NVIDIA's embedding model
+	embedding, err := aiClient.Embeddings.New(ctx, openai.EmbeddingNewParams{
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfArrayOfStrings: []string{text},
+		},
+		Model: openai.EmbeddingModel("nvidia/llama-nemotron-embed-1b-v2"),
+	}, option.WithJSONSet("input_type", "query"), option.WithJSONSet("truncate", "NONE"))
+
+	if err != nil {
+		log.Printf("[AIService] Failed to generate query embedding: %v", err)
+		return nil, err
+	}
+
+	if len(embedding.Data) == 0 {
+		return nil, fmt.Errorf("no embedding data returned from AI model")
+	}
+
+	// Convert []float64 to []float32
+	vec := embedding.Data[0].Embedding
+	result := make([]float32, len(vec))
+	for i, v := range vec {
+		result[i] = float32(v)
+	}
+
+	return result, nil
+}

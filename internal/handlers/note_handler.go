@@ -13,6 +13,7 @@ import (
 	"cogniscan/backend/internal/database"
 	"cogniscan/backend/internal/middleware"
 	"cogniscan/backend/internal/models"
+	"cogniscan/backend/internal/queue"
 	"cogniscan/backend/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -59,15 +60,16 @@ func CreateNote(c *gin.Context) {
 	now := time.Now()
 	noteID := primitive.NewObjectID()
 	newNote := models.Note{
-		ID:        noteID,
-		Name:      name,
-		PublicURL: "", // REFACTORED
-		DriveID:   driveID,
-		Caption:   "", // Initially empty, will be generated asynchronously
-		CreatedAt: now,
-		UpdatedAt: now,
-		FolderID:  folderId,
-		OwnerID:   firebaseUser.UID,
+		ID:            noteID,
+		Name:          name,
+		PublicURL:     "", // REFACTORED
+		DriveID:       driveID,
+		Caption:       "", // Initially empty, will be generated asynchronously
+		CaptionStatus: models.CaptionStatusPending,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		FolderID:      folderId,
+		OwnerID:       firebaseUser.UID,
 	}
 	notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -78,22 +80,19 @@ func CreateNote(c *gin.Context) {
 		return
 	}
 
-	// Spawn background goroutine for async caption generation
-	// This doesn't block the response - caption will be populated later
-	go func() {
-		caption, err := services.GenerateCaption(imageBytes)
-		if err != nil {
-			log.Printf("[NoteHandler] Caption generation failed for note %s: %v", noteID.Hex(), err)
-			// Graceful degradation - note remains without caption
-			return
-		}
-
-		if err := services.UpdateNoteCaption(noteID.Hex(), caption); err != nil {
-			log.Printf("[NoteHandler] Failed to update caption for note %s: %v", noteID.Hex(), err)
-		} else {
-			log.Printf("[NoteHandler] Caption generated and saved for note %s", noteID.Hex())
-		}
-	}()
+	// Enqueue caption generation job for background processing
+	// Worker will download image from Drive, generate caption, and update MongoDB
+	job := queue.CaptionJob{
+		ID:      primitive.NewObjectID().Hex(),
+		NoteID:  noteID.Hex(),
+		DriveID: driveID,
+	}
+	if err := services.EnqueueCaptionJob(job); err != nil {
+		log.Printf("[NoteHandler] Failed to enqueue caption job for note %s: %v", noteID.Hex(), err)
+		// Note is saved with "pending" status, can be retried later
+	} else {
+		log.Printf("[NoteHandler] Enqueued caption job %s for note %s", job.ID, noteID.Hex())
+	}
 
 	c.JSON(http.StatusCreated, newNote)
 }
@@ -309,37 +308,27 @@ func RegenerateCaption(c *gin.Context) {
 		return
 	}
 
-	// Download image from Drive
-	resp, err := services.DownloadFileContent(note.DriveID)
-	if err != nil {
-		log.Printf("[RegenerateCaption] Failed to download image from Drive: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve image"})
-		return
-	}
-	defer resp.Body.Close()
-
-	imageBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("[RegenerateCaption] Failed to read image bytes: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process image"})
-		return
+	// Update note status to "pending" and enqueue caption generation job
+	job := queue.CaptionJob{
+		ID:      primitive.NewObjectID().Hex(),
+		NoteID:  noteID.Hex(),
+		DriveID: note.DriveID,
 	}
 
-	// Spawn goroutine for async caption generation
-	go func() {
-		caption, err := services.GenerateCaption(imageBytes)
-		if err != nil {
-			log.Printf("[RegenerateCaption] Caption generation failed for note %s: %v", noteID.Hex(), err)
-			return
-		}
+	// First update status to "pending" in MongoDB
+	update := bson.M{"$set": bson.M{"captionStatus": models.CaptionStatusPending, "captionError": "", "updatedAt": time.Now()}}
+	if _, err := notesCollection.UpdateOne(ctx, filter, update); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update note status"})
+		return
+	}
 
-		if err := services.UpdateNoteCaption(noteID.Hex(), caption); err != nil {
-			log.Printf("[RegenerateCaption] Failed to update caption: %v", err)
-		} else {
-			log.Printf("[RegenerateCaption] Caption regenerated for note %s", noteID.Hex())
-		}
-	}()
+	// Enqueue job for background processing
+	if err := services.EnqueueCaptionJob(job); err != nil {
+		log.Printf("[RegenerateCaption] Failed to enqueue caption job for note %s: %v", noteID.Hex(), err)
+		// Note status is "pending", can be retried later
+	}
 
+	log.Printf("[RegenerateCaption] Enqueued caption job %s for note %s", job.ID, noteID.Hex())
 	c.JSON(http.StatusAccepted, gin.H{
 		"message": "Caption regeneration started",
 		"noteId":  noteID.Hex(),

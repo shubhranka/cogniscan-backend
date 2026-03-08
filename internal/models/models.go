@@ -26,14 +26,38 @@ type Folder struct {
 	UpdatedAt time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
 
+type CaptionStatus string
+
+const (
+	CaptionStatusPending   CaptionStatus = "pending"
+	CaptionStatusProcessing CaptionStatus = "processing"
+	CaptionStatusCompleted CaptionStatus = "completed"
+	CaptionStatusFailed    CaptionStatus = "failed"
+)
+
 type Note struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name      string             `bson:"name" json:"name"`
-	PublicURL string             `bson:"publicUrl" json:"publicUrl"`
-	DriveID   string             `bson:"driveId" json:"driveId"`
-	Caption   string             `bson:"caption" json:"caption"`
-	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
-	UpdatedAt time.Time          `bson:"updatedAt" json:"updatedAt"`
-	FolderID  string             `bson:"folderId" json:"folderId"`
-	OwnerID   string             `bson:"ownerId" json:"ownerId"`
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name          string             `bson:"name" json:"name"`
+	PublicURL     string             `bson:"publicUrl" json:"publicUrl"`
+	DriveID       string             `bson:"driveId" json:"driveId"`
+	Caption       string             `bson:"caption" json:"caption"`
+	CaptionStatus CaptionStatus     `bson:"captionStatus" json:"captionStatus"`
+	CaptionError  string             `bson:"captionError,omitempty" json:"captionError,omitempty"`
+	CreatedAt     time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt     time.Time          `bson:"updatedAt" json:"updatedAt"`
+	FolderID      string             `bson:"folderId" json:"folderId"`
+	OwnerID       string             `bson:"ownerId" json:"ownerId"`
+}
+
+// CaptionEmbedding represents a caption with its embedding vector
+// Stored in a separate collection for vector search
+type CaptionEmbedding struct {
+	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	NoteID      string             `bson:"noteId" json:"noteId"`
+	FolderID    string             `bson:"folderId" json:"folderId"`
+	OwnerID     string             `bson:"ownerId" json:"ownerId"`
+	Caption     string             `bson:"caption" json:"caption"`
+	Vector      []float32          `bson:"vector" json:"vector"` // Embedding vector
+	CreatedAt   time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt   time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
