@@ -31,6 +31,7 @@ type Note struct {
 	Name      string             `bson:"name" json:"name"`
 	PublicURL string             `bson:"publicUrl" json:"publicUrl"`
 	DriveID   string             `bson:"driveId" json:"driveId"`
+	Caption   string             `bson:"caption" json:"caption"`
 	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
 	UpdatedAt time.Time          `bson:"updatedAt" json:"updatedAt"`
 	FolderID  string             `bson:"folderId" json:"folderId"`

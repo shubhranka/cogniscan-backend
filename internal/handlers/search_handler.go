@@ -22,6 +22,7 @@ type SearchResultItem struct {
 	Type      string    `json:"type"`
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	Caption   string    `json:"caption,omitempty"` // NEW FIELD for notes
 	ParentID  string    `json:"parentId,omitempty"` // For folders
 	MegaURL   string    `json:"megaUrl,omitempty"`  // For notes
 	FolderID  string    `json:"folderId,omitempty"` // For notes
@@ -87,7 +88,10 @@ func SearchItems(c *gin.Context) {
 		notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
 		filter := bson.M{
 			"ownerId": firebaseUser.UID,
-			"name":    bson.M{"$regex": query, "$options": "i"},
+			"$or": []bson.M{
+				{"name": bson.M{"$regex": query, "$options": "i"}},
+				{"caption": bson.M{"$regex": query, "$options": "i"}},
+			},
 		}
 		cursor, err := notesCollection.Find(ctx, filter)
 		if err != nil {
@@ -104,6 +108,7 @@ func SearchItems(c *gin.Context) {
 					Type:      "note",
 					ID:        n.ID.Hex(),
 					Name:      n.Name,
+					Caption:   n.Caption,
 					FolderID:  n.FolderID,
 					CreatedAt: n.CreatedAt,
 				})

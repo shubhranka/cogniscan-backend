@@ -45,6 +45,12 @@ func main() {
 		log.Fatalf("Failed to initialize Drive Service: %v", err)
 	}
 
+	// Initialize AI Service for caption generation
+	if err := services.InitAIService(); err != nil {
+		log.Printf("Warning: Failed to initialize AI Service: %v", err)
+		// Continue without AI service - graceful degradation
+	}
+
 	// Initialize Firebase Admin SDK from Environment Variable
 	ctx := context.Background()
 	keyDataString := os.Getenv("KEY_DATA")
@@ -91,6 +97,7 @@ func main() {
 			protected.PUT("/notes/:id", handlers.UpdateNote)
 			protected.DELETE("/notes/:id", handlers.DeleteNote)
 			protected.GET("/notes/:id/image", handlers.GetNoteImage)
+			protected.PUT("/notes/:id/caption", handlers.RegenerateCaption)
 			// The /notes/:id/image route has been removed as it's no longer needed
 
 			// SEARCH ROUTE
