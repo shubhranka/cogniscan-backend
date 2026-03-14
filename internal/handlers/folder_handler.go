@@ -213,3 +213,61 @@ func deleteFolderRecursively(ctx context.Context, parentIDHex, ownerID string) e
 	}
 	return nil
 }
+
+// GetNameSuggestionsForFolder returns AI-generated name suggestions for a folder
+func GetNameSuggestionsForFolder(c *gin.Context) {
+	folderID, err := primitive.ObjectIDFromHex(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid folder ID"})
+		return
+	}
+
+	firebaseUser := middleware.ForContext(c.Request.Context())
+	if firebaseUser == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
+	filter := bson.M{
+		"folderId":   folderID.Hex(),
+		"ownerId":    firebaseUser.UID,
+		"caption":    bson.M{"$ne": ""},
+		"captionStatus": models.CaptionStatusCompleted,
+	}
+
+	cursor, err := notesCollection.Find(ctx, filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch notes"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var notes []models.Note
+	if err := cursor.All(ctx, &notes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
+		return
+	}
+
+	if len(notes) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No notes with captions found in folder"})
+		return
+	}
+
+	captions := make([]string, 0, len(notes))
+	for _, note := range notes {
+		captions = append(captions, note.Caption)
+	}
+
+	suggestions, err := services.GenerateNameSuggestionsForFolder(captions)
+	if err != nil {
+		log.Printf("[GetNameSuggestionsForFolder] Failed to generate suggestions: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate name suggestions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"suggestions": suggestions})
+}

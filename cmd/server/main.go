@@ -135,6 +135,8 @@ func main() {
 			protected.GET("/notes/:id/image", handlers.GetNoteImage)
 			protected.PUT("/notes/:id/caption", handlers.RegenerateCaption)
 			// The /notes/:id/image route has been removed as it's no longer needed
+			protected.GET("/notes/name-suggestions/:id", handlers.GetNameSuggestionsForNote)
+			protected.GET("/folders/name-suggestions/:id", handlers.GetNameSuggestionsForFolder)
 
 			// SEARCH ROUTE
 			protected.GET("/search", handlers.SearchItems)
@@ -147,6 +149,7 @@ func main() {
 			protected.GET("/quizzes/:quizId/questions", handlers.GetQuizQuestions)
 			protected.POST("/quizzes/:quizId/questions/:questionId/answer", handlers.SubmitAnswer)
 			protected.GET("/quizzes/:quizId/summary", handlers.GetQuizSummary)
+			protected.POST("/quizzes/:quizId/regenerate", handlers.RegenerateQuiz)
 
 			// REVIEW ROUTES
 			protected.GET("/reviews/queue", handlers.GetReviewQueue)

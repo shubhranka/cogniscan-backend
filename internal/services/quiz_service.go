@@ -82,7 +82,7 @@ func UpdateFolderQuizStatus(ctx context.Context, folderID, ownerID string, statu
 	update := bson.M{
 		"$set": bson.M{
 			"quizGenerationStatus": status,
-			"quizUpdatedAt":       time.Now(),
+			"quizUpdatedAt":        time.Now(),
 		},
 	}
 
@@ -123,8 +123,8 @@ func GetFolderQuizStatus(ctx context.Context, folderID, ownerID string) (*Folder
 
 	var folder struct {
 		QuizGenerationStatus models.QuizGenerationStatus `bson:"quizGenerationStatus"`
-		QuizID              string                      `bson:"quizId"`
-		QuizError           string                      `bson:"quizError"`
+		QuizID               string                      `bson:"quizId"`
+		QuizError            string                      `bson:"quizError"`
 	}
 
 	err = collection.FindOne(ctx, bson.M{"_id": objID, "ownerId": ownerID}).Decode(&folder)
@@ -157,21 +157,21 @@ func GenerateQuestionsUsingAI(ctx context.Context, notes []models.Note) ([]model
 		noteContext += fmt.Sprintf("Note ID: %s\nCaption: %s\n\n", note.ID.Hex(), note.Caption)
 	}
 
-	// Calculate number of questions (2-4 notes per question)
-	notesPerQuestion := 3
-	questionCount := (len(notes) + notesPerQuestion - 1) / notesPerQuestion
-
 	prompt := fmt.Sprintf(`You are an educational content creator for a learning app. Generate multiple-choice quiz questions from the provided study notes.
 
 STUDY MATERIAL:
 %s
 
 GENERATION REQUIREMENTS:
-1. Generate exactly %d multiple-choice questions to cover all the notes
-2. Each question must reference between 2-4 different notes from the list above
-3. Questions should be moderate difficulty - challenging but fair
-4. Include a brief explanation for the correct answer
-5. Each question should test understanding, not just recall
+1. Analyze the provided notes and determine how many questions would be appropriate based on:
+   - The amount and complexity of content in the notes
+   - Ensuring comprehensive coverage of the material
+   - Avoiding redundancy in questions
+2. Generate between 3 and 15 questions (adjust based on content volume)
+3. Each question should reference between 2-4 different notes from the list above
+4. Questions should be moderate difficulty - challenging but fair
+5. Include a brief explanation for the correct answer
+6. Each question should test understanding, not just recall
 
 OUTPUT FORMAT (valid JSON array only, no markdown):
 [
@@ -187,7 +187,7 @@ OUTPUT FORMAT (valid JSON array only, no markdown):
 IMPORTANT:
 - correctOption is a zero-based index (0-3)
 - referencedNoteIds must contain the exact note IDs from the input
-- Return only valid JSON, no surrounding text`, noteContext, questionCount)
+- Return only valid JSON, no surrounding text`, noteContext)
 
 	// Call NVIDIA API
 	completion, err := aiClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
@@ -195,7 +195,7 @@ IMPORTANT:
 			openai.UserMessage(prompt),
 		},
 		Model:       quizModel,
-		MaxTokens:   openai.Int(4096),
+		MaxTokens:   openai.Int(6144), // Increased for potentially more questions
 		Temperature: openai.Float(0.70),
 		TopP:        openai.Float(0.90),
 	})
@@ -212,6 +212,16 @@ IMPORTANT:
 	var questions []models.Question
 	if err := json.Unmarshal([]byte(completion.Choices[0].Message.Content), &questions); err != nil {
 		return nil, fmt.Errorf("failed to parse AI response: %w", err)
+	}
+
+	// Ensure at least some questions were generated
+	if len(questions) == 0 {
+		return nil, fmt.Errorf("AI generated no questions")
+	}
+
+	// Cap at reasonable maximum
+	if len(questions) > 30 {
+		questions = questions[:30]
 	}
 
 	return questions, nil
@@ -259,6 +269,7 @@ func CreateQuizForFolder(ctx context.Context, folderID, ownerID string, updateSt
 		OwnerID:        ownerID,
 		Status:         models.QuizStatusCompleted,
 		TotalQuestions: len(questions),
+		CorrectAnswers: 0, // Initialize to 0
 		CreatedAt:      nowTime,
 		UpdatedAt:      nowTime,
 	}

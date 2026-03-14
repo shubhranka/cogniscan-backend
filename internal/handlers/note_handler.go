@@ -334,3 +334,43 @@ func RegenerateCaption(c *gin.Context) {
 		"noteId":  noteID.Hex(),
 	})
 }
+
+// GetNameSuggestionsForNote returns AI-generated name suggestions for a note
+func GetNameSuggestionsForNote(c *gin.Context) {
+	noteID, err := primitive.ObjectIDFromHex(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
+		return
+	}
+
+	firebaseUser := middleware.ForContext(c.Request.Context())
+	if firebaseUser == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var note models.Note
+	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.UID}
+	if err := notesCollection.FindOne(ctx, filter).Decode(&note); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found or access denied"})
+		return
+	}
+
+	if note.Caption == "" || note.CaptionStatus != models.CaptionStatusCompleted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Note caption is not available yet"})
+		return
+	}
+
+	suggestions, err := services.GenerateNameSuggestionsForNote(note.Caption)
+	if err != nil {
+		log.Printf("[GetNameSuggestionsForNote] Failed to generate suggestions: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate name suggestions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"suggestions": suggestions})
+}

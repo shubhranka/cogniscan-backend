@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 
 	"cogniscan/backend/internal/middleware"
 	"cogniscan/backend/internal/models"
@@ -216,6 +217,19 @@ func SubmitAnswer(c *gin.Context) {
 	// Check answer
 	isCorrect := payload.SelectedOption == question.CorrectOption
 
+	// Check if user already answered this question BEFORE inserting
+	answerCollection := services.GetAnswerCollection()
+	var existingAnswer bson.M
+	checkErr := answerCollection.FindOne(
+		c.Request.Context(),
+		bson.M{
+			"questionId": questionID,
+			"userId":     firebaseUser.UID,
+		},
+	).Decode(&existingAnswer)
+
+	isFirstAnswer := checkErr == mongo.ErrNoDocuments
+
 	// Save answer
 	answer := &models.QuestionAnswer{
 		QuestionID:     questionID,
@@ -238,14 +252,21 @@ func SubmitAnswer(c *gin.Context) {
 		// Review data is secondary
 	}
 
-	// Update quiz correct count
-	if isCorrect {
+	// Update quiz correct count only if this is the first time answering this question
+	if isCorrect && isFirstAnswer {
 		quizzesCollection := services.GetQuizCollection()
-		quizzesCollection.UpdateOne(
+		result, err := quizzesCollection.UpdateOne(
 			c.Request.Context(),
 			bson.M{"_id": quiz.ID},
 			bson.M{"$inc": bson.M{"correctAnswers": 1}},
 		)
+		if err != nil {
+			log.Printf("Failed to update quiz correct count: %v", err)
+		} else {
+			log.Printf("Updated quiz correct count: matched %d, modified %d", result.MatchedCount, result.ModifiedCount)
+		}
+	} else {
+		log.Printf("Not updating quiz count - isCorrect: %v, isFirstAnswer: %v", isCorrect, isFirstAnswer)
 	}
 
 	c.JSON(http.StatusOK, AnswerResponse{
@@ -271,6 +292,8 @@ func GetQuizSummary(c *gin.Context) {
 		return
 	}
 
+	log.Printf("Quiz summary - QuizID: %s, TotalQuestions: %d, CorrectAnswers: %d", quizID, quiz.TotalQuestions, quiz.CorrectAnswers)
+
 	completionRate := 0.0
 	if quiz.TotalQuestions > 0 {
 		completionRate = float64(quiz.CorrectAnswers) / float64(quiz.TotalQuestions) * 100
@@ -281,5 +304,89 @@ func GetQuizSummary(c *gin.Context) {
 		"correctAnswers": quiz.CorrectAnswers,
 		"completionRate": completionRate,
 		"status":         quiz.Status,
+	})
+}
+
+// RegenerateQuiz deletes the existing quiz and triggers regeneration for a folder
+func RegenerateQuiz(c *gin.Context) {
+	firebaseUser := middleware.ForContext(c.Request.Context())
+	if firebaseUser == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	quizID := c.Param("quizId")
+
+	// Get quiz to find folder ID
+	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.UID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Quiz not found"})
+		return
+	}
+
+	folderID := quiz.FolderID
+
+	// Get all question IDs for this quiz to delete their answers
+	questionsCollection := services.GetQuestionCollection()
+	cursor, err := questionsCollection.Find(c.Request.Context(), bson.M{"quizId": quizID})
+	if err != nil {
+		log.Printf("Failed to find quiz questions: %v", err)
+	} else {
+		var questionIDs []string
+		for cursor.Next(c.Request.Context()) {
+			var question models.Question
+			if err := cursor.Decode(&question); err == nil {
+				questionIDs = append(questionIDs, question.ID.Hex())
+			}
+		}
+		cursor.Close(c.Request.Context())
+
+		// Delete existing question answers by question IDs
+		if len(questionIDs) > 0 {
+			answerCollection := services.GetAnswerCollection()
+			answerCollection.DeleteMany(c.Request.Context(), bson.M{
+				"questionId": bson.M{"$in": questionIDs},
+				"userId":      firebaseUser.UID,
+			})
+		}
+	}
+
+	// Delete existing quiz questions
+	questionsCollection.DeleteMany(c.Request.Context(), bson.M{"quizId": quizID})
+
+	// Delete the quiz document
+	quizzesCollection := services.GetQuizCollection()
+	quizzesCollection.DeleteOne(c.Request.Context(), bson.M{"_id": quiz.ID, "ownerId": firebaseUser.UID})
+
+	// Create job for regeneration
+	jobID := uuid.New().String()
+	job := queue.QuizJob{
+		ID:       jobID,
+		FolderID: folderID,
+		OwnerID:  firebaseUser.UID,
+	}
+
+	// Enqueue job
+	if err := services.EnqueueQuizJob(job); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to queue quiz regeneration"})
+		return
+	}
+
+	// Update folder status to pending (triggers regeneration)
+	if err := services.UpdateFolderQuizStatus(
+		c.Request.Context(),
+		folderID,
+		firebaseUser.UID,
+		models.QuizGenStatusPending,
+		"",
+		"",
+	); err != nil {
+		log.Printf("Failed to update folder quiz status: %v", err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Quiz regeneration started",
+		"folderId": folderID,
+		"jobId":    jobID,
 	})
 }

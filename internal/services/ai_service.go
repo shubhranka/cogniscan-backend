@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -143,4 +144,118 @@ func GenerateQueryEmbedding(text string) ([]float32, error) {
 	}
 
 	return result, nil
+}
+
+// GenerateNameSuggestionsForNote generates name suggestions based on note caption
+func GenerateNameSuggestionsForNote(caption string) ([]string, error) {
+	if !isClientInitialized() {
+		return nil, fmt.Errorf("AI client not initialized")
+	}
+
+	prompt := fmt.Sprintf(`You are helping a user name their scanned document note.
+
+DOCUMENT DESCRIPTION:
+%s
+
+TASK: Generate 5-6 creative and descriptive name suggestions for this note.
+Each suggestion should be:
+1. Concise (2-6 words)
+2. Descriptive of content
+3. Professional yet friendly
+4. Easy to remember
+
+OUTPUT FORMAT (valid JSON array only, no markdown):
+["Suggestion 1", "Suggestion 2", "Suggestion 3", "Suggestion 4", "Suggestion 5"]
+
+Return only valid JSON, no surrounding text.`, caption)
+
+	ctx := context.Background()
+	completion, err := aiClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(prompt),
+		},
+		Model:       shared.ChatModel("meta/llama-3.3-70b-instruct"),
+		MaxTokens:   openai.Int(512),
+		Temperature: openai.Float(0.80),
+		TopP:        openai.Float(0.90),
+	})
+
+	if err != nil {
+		log.Printf("[AIService] Failed to generate name suggestions: %v", err)
+		return nil, err
+	}
+
+	if len(completion.Choices) == 0 {
+		return nil, fmt.Errorf("no response from AI model")
+	}
+
+	var suggestions []string
+	if err := json.Unmarshal([]byte(completion.Choices[0].Message.Content), &suggestions); err != nil {
+		log.Printf("[AIService] Failed to parse name suggestions: %v", err)
+		return nil, err
+	}
+
+	return suggestions, nil
+}
+
+// GenerateNameSuggestionsForFolder generates name suggestions based on all note captions in folder
+func GenerateNameSuggestionsForFolder(noteCaptions []string) ([]string, error) {
+	if !isClientInitialized() {
+		return nil, fmt.Errorf("AI client not initialized")
+	}
+
+	if len(noteCaptions) == 0 {
+		return nil, fmt.Errorf("no notes in folder")
+	}
+
+	captionsText := ""
+	for i, caption := range noteCaptions {
+		captionsText += fmt.Sprintf("Note %d: %s\n\n", i+1, caption)
+	}
+
+	prompt := fmt.Sprintf(`You are helping a user name a folder containing scanned documents.
+
+DOCUMENTS IN FOLDER:
+%s
+
+TASK: Generate 5-6 creative and descriptive name suggestions for this folder.
+Consider common themes, topics, or subject matter across all documents.
+Each suggestion should be:
+1. Concise (2-6 words)
+2. Representative of folder's content
+3. Professional yet friendly
+4. Easy to organize and remember
+
+OUTPUT FORMAT (valid JSON array only, no markdown):
+["Suggestion 1", "Suggestion 2", "Suggestion 3", "Suggestion 4", "Suggestion 5"]
+
+Return only valid JSON, no surrounding text.`, captionsText)
+
+	ctx := context.Background()
+	completion, err := aiClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(prompt),
+		},
+		Model:       shared.ChatModel("meta/llama-3.3-70b-instruct"),
+		MaxTokens:   openai.Int(512),
+		Temperature: openai.Float(0.80),
+		TopP:        openai.Float(0.90),
+	})
+
+	if err != nil {
+		log.Printf("[AIService] Failed to generate folder name suggestions: %v", err)
+		return nil, err
+	}
+
+	if len(completion.Choices) == 0 {
+		return nil, fmt.Errorf("no response from AI model")
+	}
+
+	var suggestions []string
+	if err := json.Unmarshal([]byte(completion.Choices[0].Message.Content), &suggestions); err != nil {
+		log.Printf("[AIService] Failed to parse folder name suggestions: %v", err)
+		return nil, err
+	}
+
+	return suggestions, nil
 }
