@@ -102,6 +102,17 @@ func main() {
 
 	log.Printf("[Main] Caption workers started with count: %d", workerCount)
 
+	// Start quiz workers
+	quizWorkerCount := 2
+	if qwc := os.Getenv("QUIZ_WORKER_COUNT"); qwc != "" {
+		if n, err := strconv.Atoi(qwc); err == nil && n > 0 {
+			quizWorkerCount = n
+		}
+	}
+	workers.StartQuizWorker(mainCtx, quizWorkerCount)
+
+	log.Printf("[Main] Quiz workers started with count: %d", quizWorkerCount)
+
 	// Initialize Gin Router
 	router := gin.Default()
 	router.GET("/health", handlers.HealthCheck)
@@ -127,6 +138,20 @@ func main() {
 
 			// SEARCH ROUTE
 			protected.GET("/search", handlers.SearchItems)
+
+			// QUIZ ROUTES
+			protected.POST("/quizzes/folders/:folderId", handlers.CreateQuiz)
+			protected.POST("/quizzes/folders/:folderId/request", handlers.RequestQuizGeneration)
+			protected.GET("/quizzes/folders/:folderId/status", handlers.GetQuizStatus)
+			protected.GET("/quizzes/:quizId", handlers.GetQuiz)
+			protected.GET("/quizzes/:quizId/questions", handlers.GetQuizQuestions)
+			protected.POST("/quizzes/:quizId/questions/:questionId/answer", handlers.SubmitAnswer)
+			protected.GET("/quizzes/:quizId/summary", handlers.GetQuizSummary)
+
+			// REVIEW ROUTES
+			protected.GET("/reviews/queue", handlers.GetReviewQueue)
+			protected.GET("/reviews/note/:noteId/history", handlers.GetNoteReviewHistory)
+			protected.PUT("/reviews/note/:noteId/status", handlers.UpdateReviewStatus)
 		}
 	}
 
