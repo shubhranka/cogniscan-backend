@@ -183,7 +183,7 @@ func processCaptionJob(ctx context.Context, job *queue.CaptionJob) error {
 		}
 	}
 
-	log.Printf("[CaptionWorker] Generated and saved caption for note %s", job.NoteID)
+	log.Printf("[CaptionWorker] Generated and saved transcription for note %s", job.NoteID)
 	return nil
 }
 

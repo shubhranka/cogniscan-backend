@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -37,7 +38,8 @@ func isClientInitialized() bool {
 	return os.Getenv("NVIDIA_API_KEY") != ""
 }
 
-// GenerateCaption generates a caption for an image using NVIDIA's phi-3.5-vision-instruct
+// GenerateCaption generates a full-text transcription of an image using NVIDIA's phi-3.5-vision-instruct
+// Extracts handwritten and typed text, formulas, and diagram labels with maximum accuracy
 func GenerateCaption(imageBytes []byte) (string, error) {
 	if !isClientInitialized() {
 		return "", fmt.Errorf("AI client not initialized")
@@ -46,8 +48,10 @@ func GenerateCaption(imageBytes []byte) (string, error) {
 	// Encode image to base64
 	base64Image := base64.StdEncoding.EncodeToString(imageBytes)
 
-	// Prepare the content with image tag
-	content := fmt.Sprintf("<img src=\"data:image/jpeg;base64,%s\">\n\nDescribe this image in a concise but descriptive way.", base64Image)
+	// Prepare the content with image tag - using adaptive transcription prompt
+	content := fmt.Sprintf(`<img src="data:image/jpeg;base64,%s">
+
+Transcribe all visible text from this image. Describe any diagrams or tables with their labels. Copy mathematical formulas exactly. Do not use templates or placeholders - provide actual content only.`, base64Image)
 
 	// Call the API
 	ctx := context.Background()
@@ -56,13 +60,13 @@ func GenerateCaption(imageBytes []byte) (string, error) {
 			openai.UserMessage(content),
 		},
 		Model:       shared.ChatModel("microsoft/phi-3.5-vision-instruct"),
-		MaxTokens:   openai.Int(512),
-		Temperature: openai.Float(0.20),
+		MaxTokens:   openai.Int(2048),   // Increased from 512 for comprehensive content extraction
+		Temperature: openai.Float(0.30), // Balanced for flexibility across different content types
 		TopP:        openai.Float(0.70),
 	})
 
 	if err != nil {
-		log.Printf("[AIService] Failed to generate caption: %v", err)
+		log.Printf("[AIService] Failed to generate transcription: %v", err)
 		return "", err
 	}
 
@@ -70,7 +74,11 @@ func GenerateCaption(imageBytes []byte) (string, error) {
 		return "", fmt.Errorf("no response from AI model")
 	}
 
-	return completion.Choices[0].Message.Content, nil
+	result := completion.Choices[0].Message.Content
+	if len(strings.TrimSpace(result)) == 0 {
+		return "", fmt.Errorf("empty transcription returned - image may contain no text")
+	}
+	return result, nil
 }
 
 // GenerateEmbedding generates an embedding vector for the given text using NVIDIA's llama-nemotron-embed-1b-v2

@@ -157,21 +157,28 @@ func GenerateQuestionsUsingAI(ctx context.Context, notes []models.Note) ([]model
 		noteContext += fmt.Sprintf("Note ID: %s\nCaption: %s\n\n", note.ID.Hex(), note.Caption)
 	}
 
-	prompt := fmt.Sprintf(`You are an educational content creator for a learning app. Generate multiple-choice quiz questions from the provided study notes.
+	prompt := fmt.Sprintf(`You are an educational content creator for a learning app. Generate multiple-choice quiz questions from the provided study materials.
 
-STUDY MATERIAL:
+STUDY MATERIAL (Full Transcriptions):
 %s
 
 GENERATION REQUIREMENTS:
-1. Analyze the provided notes and determine how many questions would be appropriate based on:
+1. Analyze the provided transcriptions which contain complete text from study materials
+2. Determine how many questions would be appropriate based on:
    - The amount and complexity of content in the notes
    - Ensuring comprehensive coverage of the material
    - Avoiding redundancy in questions
-2. Generate between 3 and 15 questions (adjust based on content volume)
-3. Each question should reference between 2-4 different notes from the list above
-4. Questions should be moderate difficulty - challenging but fair
-5. Include a brief explanation for the correct answer
-6. Each question should test understanding, not just recall
+3. Generate between 3 and 15 questions (adjust based on content volume)
+4. Each question should reference between 2-4 different notes from the list above
+5. Questions should be moderate difficulty - challenging but fair
+6. Include a brief explanation for the correct answer
+7. Each question should test understanding, not just recall
+
+QUESTION TYPES TO INCLUDE (when applicable):
+- Factual questions about specific terms, dates, or data points
+- Conceptual questions testing understanding of principles
+- Comparative questions asking about relationships between concepts
+- Application questions requiring use of formulas or methods
 
 OUTPUT FORMAT (valid JSON array only, no markdown):
 [
@@ -187,6 +194,7 @@ OUTPUT FORMAT (valid JSON array only, no markdown):
 IMPORTANT:
 - correctOption is a zero-based index (0-3)
 - referencedNoteIds must contain the exact note IDs from the input
+- Questions should test specific facts and understanding from the transcriptions
 - Return only valid JSON, no surrounding text`, noteContext)
 
 	// Call NVIDIA API
