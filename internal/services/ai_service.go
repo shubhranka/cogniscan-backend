@@ -96,7 +96,7 @@ func GenerateEmbedding(text string) ([]float32, error) {
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: []string{text},
 		},
-		Model: openai.EmbeddingModel("nvidia/llama-nemotron-embed-1b-v2"),
+		Model: openai.EmbeddingModel("nvidia/loca"),
 	}, option.WithJSONSet("input_type", "passage"), option.WithJSONSet("truncate", "NONE"))
 
 	if err != nil {

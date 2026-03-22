@@ -155,6 +155,13 @@ func main() {
 			protected.GET("/reviews/queue", handlers.GetReviewQueue)
 			protected.GET("/reviews/note/:noteId/history", handlers.GetNoteReviewHistory)
 			protected.PUT("/reviews/note/:noteId/status", handlers.UpdateReviewStatus)
+
+			// CHAT ROUTES
+			protected.POST("/chats", handlers.CreateConversation)
+			protected.POST("/chats/message", handlers.SendMessage)
+			protected.GET("/chats", handlers.GetConversations)
+			protected.GET("/chats/:conversationId", handlers.GetConversation)
+			protected.DELETE("/chats/:conversationId", handlers.DeleteConversation)
 		}
 	}
 
