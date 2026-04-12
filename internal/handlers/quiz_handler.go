@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 
+	"cogniscan/backend/internal/cache"
 	"cogniscan/backend/internal/middleware"
 	"cogniscan/backend/internal/models"
 	"cogniscan/backend/internal/queue"
@@ -19,6 +21,37 @@ import (
 type CreateQuizResponse struct {
 	Quiz      *models.Quiz      `json:"quiz"`
 	Questions []models.Question `json:"questions"`
+}
+
+// SessionData represents a live quiz session with tracking
+type SessionData struct {
+	SessionID      string    `json:"sessionId"`
+	UserID        string    `json:"userId"`
+	QuizID        string    `json:"quizId"`
+	FolderID      string    `json:"folderId"`
+	StartedAt     time.Time `json:"startedAt"`
+	TotalQuestions int      `json:"totalQuestions"`
+}
+
+// SessionStatistics represents live statistics for a quiz session
+type SessionStatistics struct {
+	SessionID     string  `json:"sessionId"`
+	TotalAnswered int     `json:"totalAnswered"`
+	CorrectCount  int     `json:"correctCount"`
+	Accuracy      float64 `json:"accuracy"`
+	AverageSpeed  float64 `json:"averageSpeed"` // seconds per question
+	CurrentStreak int     `json:"currentStreak"`
+	BestStreak    int     `json:"bestStreak"`
+	IsNeuralMode  bool    `json:"isNeuralMode"`
+	AdaptiveLevel string  `json:"adaptiveLevel"` // "beginner", "intermediate", "advanced", "expert"
+}
+
+// SubmitAnswerWithSessionPayload extends SubmitAnswerPayload with session tracking
+type SubmitAnswerWithSessionPayload struct {
+	SelectedOption int    `json:"selectedOption"`
+	TimeTaken      int    `json:"timeTaken"` // seconds, optional
+	SessionID      string `json:"sessionId"` // optional, for session tracking
+	IsNeuralMode   bool   `json:"isNeuralMode"` // optional, indicates Neural Assessment Mode
 }
 
 // CreateQuiz generates a quiz for a folder (synchronous - for backward compatibility)
@@ -176,12 +209,14 @@ type SubmitAnswerPayload struct {
 }
 
 type AnswerResponse struct {
-	IsCorrect     bool   `json:"isCorrect"`
-	Explanation   string `json:"explanation"`
-	CorrectOption int    `json:"correctOption"`
+	IsCorrect       bool     `json:"isCorrect"`
+	Explanation     string   `json:"explanation"`
+	CorrectOption   int      `json:"correctOption"`
+	SessionStats    *SessionStatistics `json:"sessionStats,omitempty"` // Live session statistics if session tracking enabled
+	AdaptiveFeedback string  `json:"adaptiveFeedback,omitempty"` // AI-generated adaptive feedback in Neural Assessment Mode
 }
 
-// SubmitAnswer records an answer to a question
+// SubmitAnswer records an answer to a question with optional session tracking for Neural Assessment Mode
 func SubmitAnswer(c *gin.Context) {
 	firebaseUser := middleware.ForContext(c.Request.Context())
 	if firebaseUser == nil {
@@ -192,12 +227,24 @@ func SubmitAnswer(c *gin.Context) {
 	quizID := c.Param("quizId")
 	questionID := c.Param("questionId")
 
+	// Try to bind as enhanced payload first (session tracking)
+	var enhancedPayload SubmitAnswerWithSessionPayload
 	var payload SubmitAnswerPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		log.Printf("Failed to bind JSON: %v, Content-Type: %s, Content-Length: %s", err,
-			c.GetHeader("Content-Type"), c.GetHeader("Content-Length"))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload", "details": err.Error()})
-		return
+	useEnhanced := false
+
+	if err := c.ShouldBindJSON(&enhancedPayload); err == nil && enhancedPayload.SessionID != "" {
+		// Using enhanced payload with session tracking
+		useEnhanced = true
+		payload.SelectedOption = enhancedPayload.SelectedOption
+		payload.TimeTaken = enhancedPayload.TimeTaken
+	} else {
+		// Fallback to basic payload (backward compatibility)
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			log.Printf("Failed to bind JSON: %v, Content-Type: %s, Content-Length: %s", err,
+				c.GetHeader("Content-Type"), c.GetHeader("Content-Length"))
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload", "details": err.Error()})
+			return
+		}
 	}
 
 	// Get question
@@ -252,6 +299,61 @@ func SubmitAnswer(c *gin.Context) {
 		// Review data is secondary
 	}
 
+	// ============ SESSION TRACKING (Neural Assessment Mode) ============
+	var sessionStats *SessionStatistics
+	var adaptiveFeedback string
+	var cumulativeTotalTime int
+
+	if useEnhanced {
+		// Get existing session data from Redis
+		existingSession, err := cache.GetActiveSession(firebaseUser.UID)
+		if err == nil && existingSession != nil {
+			// Get existing cumulative time
+			existingTotalTime := getInt(existingSession, "totalTime", 0)
+			// Update session statistics
+			sessionStats = updateSessionStatistics(existingSession, isCorrect, payload.TimeTaken, quiz.TotalQuestions, enhancedPayload.IsNeuralMode, existingTotalTime)
+			cumulativeTotalTime = existingTotalTime + payload.TimeTaken
+		} else {
+			// Create new session statistics
+			sessionStats = &SessionStatistics{
+				SessionID:     enhancedPayload.SessionID,
+				TotalAnswered: 1,
+				CorrectCount:  boolToInt(isCorrect),
+				Accuracy:      boolToFloat(isCorrect),
+				AverageSpeed:  float64(payload.TimeTaken),
+				CurrentStreak: boolToInt(isCorrect),
+				BestStreak:    boolToInt(isCorrect),
+				IsNeuralMode:  enhancedPayload.IsNeuralMode,
+				AdaptiveLevel: "intermediate", // Default level
+			}
+			cumulativeTotalTime = payload.TimeTaken
+		}
+
+		// Store updated session data in Redis
+		sessionData := map[string]interface{}{
+			"sessionId":      sessionStats.SessionID,
+			"userId":        firebaseUser.UID,
+			"quizId":        quizID,
+			"folderId":      quiz.FolderID,
+			"totalAnswered":  sessionStats.TotalAnswered,
+			"correctCount":  sessionStats.CorrectCount,
+			"accuracy":      sessionStats.Accuracy,
+			"averageSpeed":  sessionStats.AverageSpeed,
+			"currentStreak": sessionStats.CurrentStreak,
+			"bestStreak":    sessionStats.BestStreak,
+			"isNeuralMode":  sessionStats.IsNeuralMode,
+			"totalTime":     cumulativeTotalTime,
+		}
+		if err := cache.SetActiveSession(firebaseUser.UID, enhancedPayload.SessionID, sessionData); err != nil {
+			log.Printf("Failed to store session data in Redis: %v", err)
+		}
+
+		// Generate adaptive feedback if in Neural Assessment Mode
+		if enhancedPayload.IsNeuralMode {
+			adaptiveFeedback = generateAdaptiveFeedback(isCorrect, sessionStats)
+		}
+	}
+
 	// Update quiz correct count only if this is the first time answering this question
 	if isCorrect && isFirstAnswer {
 		quizzesCollection := services.GetQuizCollection()
@@ -270,9 +372,11 @@ func SubmitAnswer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, AnswerResponse{
-		IsCorrect:     isCorrect,
-		Explanation:   question.Explanation,
-		CorrectOption: question.CorrectOption,
+		IsCorrect:       isCorrect,
+		Explanation:     question.Explanation,
+		CorrectOption:   question.CorrectOption,
+		SessionStats:    sessionStats,
+		AdaptiveFeedback: adaptiveFeedback,
 	})
 }
 
@@ -389,4 +493,116 @@ func RegenerateQuiz(c *gin.Context) {
 		"folderId": folderID,
 		"jobId":    jobID,
 	})
+}
+
+// ============ SESSION TRACKING HELPER FUNCTIONS ============
+
+// updateSessionStatistics updates the session statistics based on a new answer
+func updateSessionStatistics(existingSession map[string]interface{}, isCorrect bool, timeTaken int, totalQuestions int, isNeuralMode bool, existingTotalTime int) *SessionStatistics {
+	totalAnswered := getInt(existingSession, "totalAnswered", 0) + 1
+	correctCount := getInt(existingSession, "correctCount", 0)
+	currentStreak := getInt(existingSession, "currentStreak", 0)
+	bestStreak := getInt(existingSession, "bestStreak", 0)
+
+	// Use the existing cumulative time provided from Redis
+	totalTime := float64(existingTotalTime) + float64(timeTaken)
+
+	if isCorrect {
+		correctCount++
+		currentStreak++
+		if currentStreak > bestStreak {
+			bestStreak = currentStreak
+		}
+	} else {
+		currentStreak = 0
+	}
+
+	accuracy := float64(correctCount) / float64(totalAnswered) * 100
+	averageSpeed := totalTime / float64(totalAnswered)
+
+	adaptiveLevel := "intermediate"
+	if isNeuralMode {
+		adaptiveLevel = calculateAdaptiveLevel(accuracy, averageSpeed)
+	}
+
+	return &SessionStatistics{
+		SessionID:     getString(existingSession, "sessionId", ""),
+		TotalAnswered: totalAnswered,
+		CorrectCount:  correctCount,
+		Accuracy:      accuracy,
+		AverageSpeed:  averageSpeed,
+		CurrentStreak: currentStreak,
+		BestStreak:    bestStreak,
+		IsNeuralMode:  isNeuralMode,
+		AdaptiveLevel: adaptiveLevel,
+	}
+}
+
+// generateAdaptiveFeedback generates adaptive feedback based on current performance
+func generateAdaptiveFeedback(isCorrect bool, stats *SessionStatistics) string {
+	if isCorrect {
+		if stats.CurrentStreak >= 5 {
+			return fmt.Sprintf("Excellent! You're on a %d-question streak. Your accuracy of %.1f%% shows strong mastery. The AI is preparing more challenging questions.", stats.CurrentStreak, stats.Accuracy)
+		} else if stats.Accuracy >= 80 {
+			return "Well done! Your strong performance suggests you're ready for more advanced concepts."
+		}
+		return "Correct! Keep building on this momentum."
+	} else {
+		if stats.CurrentStreak == 0 && stats.Accuracy < 50 {
+			return "Let's focus on understanding the fundamentals. Review the explanation and try similar questions."
+		} else if stats.Accuracy >= 70 {
+			return "Nice attempt! You're showing good progress overall. This concept needs a bit more reinforcement."
+		}
+		return "Not quite right. Review the explanation and consider reviewing related notes in this folder."
+	}
+}
+
+// calculateAdaptiveLevel determines the adaptive difficulty level based on performance
+func calculateAdaptiveLevel(accuracy float64, averageSpeed float64) string {
+	// Accuracy is primary factor, speed is secondary
+	if accuracy >= 90 && averageSpeed < 15 {
+		return "expert"
+	} else if accuracy >= 80 || (accuracy >= 70 && averageSpeed < 10) {
+		return "advanced"
+	} else if accuracy >= 60 {
+		return "intermediate"
+	}
+	return "beginner"
+}
+
+// Helper functions for extracting values from session map
+func getInt(m map[string]interface{}, key string, defaultValue int) int {
+	if val, ok := m[key]; ok {
+		if intVal, ok := val.(int); ok {
+			return intVal
+		}
+		if floatVal, ok := val.(float64); ok {
+			return int(floatVal)
+		}
+	}
+	return defaultValue
+}
+
+func getString(m map[string]interface{}, key string, defaultValue string) string {
+	if val, ok := m[key]; ok {
+		if strVal, ok := val.(string); ok {
+			return strVal
+		}
+	}
+	return defaultValue
+}
+
+// Helper functions for boolean conversion
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func boolToFloat(b bool) float64 {
+	if b {
+		return 100.0
+	}
+	return 0.0
 }

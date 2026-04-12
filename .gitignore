@@ -1,6 +1,46 @@
+# Credentials and secrets
 key.json
 .env
-tmp
 token.json
+
+# Temporary files
+tmp/
+*.tmp
+
+# IDE files
 .vscode
-.claude
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test files
+*.test
+coverage.out
+coverage.html
+
+# Go build output
+/bin/
+/dist/
+
+# Vendor
+vendor/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Test databases
+cogniscan_test*

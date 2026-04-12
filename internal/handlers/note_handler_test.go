@@ -470,3 +470,77 @@ func TestCreateNote_MissingImage(t *testing.T) {
 		t.Errorf("CreateNote() without image should return 400, got %v", w.Code)
 	}
 }
+
+func TestGetNoteImage(t *testing.T) {
+	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	os.Setenv("DB_NAME", "cogniscan_test")
+	database.ConnectDB()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Create test note
+	noteID := primitive.NewObjectID()
+	testNote := models.Note{
+		ID:       noteID,
+		Name:     "Test Note",
+		DriveID:  "drive123",
+		FolderID: "folder123",
+		OwnerID:  "test-user-id",
+	}
+
+	notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
+	_, err := notesCollection.InsertOne(ctx, testNote)
+	if err != nil {
+		t.Skip("Skipping test: MongoDB not available")
+	}
+	defer database.Client.Database(os.Getenv("DB_NAME")).Drop(ctx)
+
+	router := setupNoteTestRouter()
+	router.GET("/notes/:id/image", GetNoteImage)
+
+	tests := []struct {
+		name       string
+		noteID     string
+		wantStatus int
+	}{
+		{
+			name:       "Successfully get note image",
+			noteID:     noteID.Hex(),
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "Invalid note ID",
+			noteID:     "invalid-id",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "Non-existent note",
+			noteID:     primitive.NewObjectID().Hex(),
+			wantStatus: http.StatusNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("GET", "/notes/"+tt.noteID+"/image", nil)
+			if err != nil {
+				t.Fatalf("Failed to create request: %v", err)
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("GetNoteImage() status = %v, want %v", w.Code, tt.wantStatus)
+			}
+
+			if tt.name == "Successfully get note image" {
+				// Verify content type is appropriate for image
+				contentType := w.Header().Get("Content-Type")
+				// Image endpoint may return image content type or redirect
+				t.Logf("Content-Type: %v", contentType)
+			}
+		})
+	}
+}

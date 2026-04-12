@@ -141,3 +141,95 @@ type NoteReview struct {
 	CreatedAt    time.Time `bson:"createdAt" json:"createdAt"`
 	UpdatedAt    time.Time `bson:"updatedAt" json:"updatedAt"`
 }
+
+// UserProgress tracks user's learning progress and statistics
+type UserProgress struct {
+	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	UserID       string             `bson:"userId" json:"userId"`
+
+	// Streak tracking
+	CurrentStreak    int       `bson:"currentStreak" json:"currentStreak"`
+	LongestStreak    int       `bson:"longestStreak" json:"longestStreak"`
+	LastActiveDate   time.Time `bson:"lastActiveDate" json:"lastActiveDate"`
+
+	// Daily goal tracking
+	DailyGoalPercent  int       `bson:"dailyGoalPercent" json:"dailyGoalPercent"`
+	DailyGoalDate    time.Time `bson:"dailyGoalDate" json:"dailyGoalDate"`
+
+	// Storage tracking
+	StorageUsedBytes int64 `bson:"storageUsedBytes" json:"storageUsedBytes"`
+	StorageQuotaBytes int64 `bson:"storageQuotaBytes" json:"storageQuotaBytes"`
+
+	// Session statistics (rolling window)
+	SessionAccuracy  float64 `bson:"sessionAccuracy" json:"sessionAccuracy"`
+	SessionAvgSpeed float64 `bson:"sessionAvgSpeed" json:"sessionAvgSpeed"`
+	SessionStreak   int      `bson:"sessionStreak" json:"sessionStreak"`
+
+	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`
+}
+
+// FolderMastery extends Folder with learning progress
+type FolderMastery struct {
+	FolderID       string    `bson:"folderId" json:"folderId"`
+	UserID         string    `bson:"userId" json:"userId"`
+
+	// Mastery calculation
+	TotalNotes      int       `bson:"totalNotes" json:"totalNotes"`
+	MasteredNotes   int       `bson:"masteredNotes" json:"masteredNotes"`
+	LearntNotes    int       `bson:"learntNotes" json:"learntNotes"`
+
+	// Mastery status
+	MasteryLevel   string    `bson:"masteryLevel" json:"masteryLevel"` // "Mastered", "Learnt", "Review Soon"
+	MasteryPercent float64   `bson:"masteryPercent" json:"masteryPercent"`
+
+	// Last activity
+	LastStudyDate time.Time `bson:"lastStudyDate" json:"lastStudyDate"`
+
+	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`
+}
+
+// DocumentIndex tracks indexing status for notes
+type DocumentIndex struct {
+	NoteID         string    `bson:"noteId" json:"noteId"`
+	UserID         string    `bson:"userId" json:"userId"`
+	FolderID       string    `bson:"folderId" json:"folderId"`
+
+	// Indexing status
+	IndexStatus    string    `bson:"indexStatus" json:"indexStatus"` // "pending", "indexing", "completed", "failed"
+	PagesIndexed   int       `bson:"pagesIndexed" json:"pagesIndexed"`
+	TotalPages     int       `bson:"totalPages" json:"totalPages"`
+	IndexedAt      time.Time `bson:"indexedAt" json:"indexedAt"`
+
+	// Summary (AI-generated)
+	SummaryText    string    `bson:"summaryText" json:"summaryText"`
+	SummaryUpdated time.Time `bson:"summaryUpdated" json:"summaryUpdated"`
+
+	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`
+}
+
+// QuizSession tracks live quiz sessions with real-time stats
+type QuizSession struct {
+	ID             primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	UserID         string             `bson:"userId" json:"userId"`
+	QuizID         string             `bson:"quizId" json:"quizId"`
+	FolderID       string             `bson:"folderId" json:"folderId"`
+
+	// Session state
+	Status         string    `bson:"status" json:"status"` // "active", "completed", "abandoned"
+	CurrentIndex   int       `bson:"currentIndex" json:"currentIndex"`
+
+	// Live statistics
+	TotalAnswered  int       `bson:"totalAnswered" json:"totalAnswered"`
+	CorrectAnswers int       `bson:"correctAnswers" json:"correctAnswers"`
+	TotalTimeSecs  int       `bson:"totalTimeSecs" json:"totalTimeSecs"`
+
+	// Session streak
+	CurrentStreak  int       `bson:"currentStreak" json:"currentStreak"`
+	LongestStreak  int       `bson:"longestStreak" json:"longestStreak"`
+
+	StartedAt      time.Time `bson:"startedAt" json:"startedAt"`
+	CompletedAt    time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+}

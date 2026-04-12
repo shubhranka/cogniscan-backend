@@ -121,6 +121,32 @@ func main() {
 	{
 		protected := api.Group("/").Use(middleware.AuthMiddleware(authClient))
 		{
+			// PROGRESS ROUTES
+			protected.GET("/progress/:userId", handlers.GetCurrentUserProgress)
+			protected.POST("/progress/daily", handlers.UpdateDailyProgress)
+			protected.POST("/progress/study-session", handlers.RecordStudySession)
+			protected.GET("/storage/:userId", handlers.GetStorageUsage)
+
+			// MASTERY ROUTES
+			protected.GET("/mastery/folders/:folderId", handlers.GetFolderMastery)
+			protected.GET("/mastery/folders", handlers.GetAllFoldersMastery)
+			protected.PUT("/mastery/notes/:noteId", handlers.UpdateNoteMastery)
+
+			// INDEXING ROUTES
+			protected.GET("/indexing/notes/:noteId", handlers.GetNoteIndexStatus)
+			protected.GET("/indexing/folders/:folderId", handlers.GetFolderIndexStatus)
+			protected.PUT("/indexing/notes/:noteId", handlers.UpdateDocumentIndex)
+			protected.POST("/indexing/notes/:noteId/summary", handlers.GenerateSummary)
+
+			// SESSION ROUTES
+			protected.POST("/session/start", handlers.StartQuizSession)
+			protected.PUT("/session/:sessionId/update", handlers.UpdateSessionProgress)
+			protected.PUT("/session/:sessionId/complete", handlers.CompleteQuizSession)
+			protected.GET("/session/active/:userId", handlers.GetActiveSession)
+
+			// SEARCH ROUTES
+			protected.GET("/search", handlers.SearchItems)
+
 			// FOLDER ROUTES
 			protected.POST("/folders", handlers.CreateFolder)
 			protected.GET("/folders/:folderId", handlers.GetFolders)
@@ -137,9 +163,6 @@ func main() {
 			// The /notes/:id/image route has been removed as it's no longer needed
 			protected.GET("/notes/name-suggestions/:id", handlers.GetNameSuggestionsForNote)
 			protected.GET("/folders/name-suggestions/:id", handlers.GetNameSuggestionsForFolder)
-
-			// SEARCH ROUTE
-			protected.GET("/search", handlers.SearchItems)
 
 			// QUIZ ROUTES
 			protected.POST("/quizzes/folders/:folderId", handlers.CreateQuiz)

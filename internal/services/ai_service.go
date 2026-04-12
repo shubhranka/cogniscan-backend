@@ -267,3 +267,49 @@ Return only valid JSON, no surrounding text.`, captionsText)
 
 	return suggestions, nil
 }
+
+// ============ NEW FUNCTIONS FOR REDESIGNED FEATURES ============
+
+// GenerateDocumentSummary generates an AI summary for a document note
+func GenerateDocumentSummary(noteContent string, noteTitle string) (string, error) {
+	if !isClientInitialized() {
+		return "", fmt.Errorf("AI client not initialized")
+	}
+
+	prompt := fmt.Sprintf(`Generate a comprehensive summary of the following document:
+TITLE: %s
+
+CONTENT:
+%s
+
+TASK: Create a well-structured summary that:
+1. Captures the main topics and key concepts
+2. Highlights important definitions and formulas
+3. Notes any examples or case studies
+4. Is concise yet informative (100-200 words)
+5. Uses bullet points for easy scanning
+6. Ends with 3-5 key takeaways
+
+OUTPUT FORMAT: Return only the summary text, no markdown or markdown formatting.`, noteTitle, noteContent)
+
+	ctx := context.Background()
+	completion, err := aiClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(prompt),
+		},
+		Model:       shared.ChatModel("gpt-4o-mini"),
+		MaxTokens:   openai.Int(500),
+		Temperature: openai.Float(0.70),
+		TopP:        openai.Float(0.90),
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to generate document summary: %w", err)
+	}
+
+	if len(completion.Choices) == 0 {
+		return "", fmt.Errorf("no response from AI model")
+	}
+
+	return completion.Choices[0].Message.Content, nil
+}
