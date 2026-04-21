@@ -75,6 +75,7 @@ func GetFolders(c *gin.Context) {
 	cursor, err := foldersCollection.Find(ctx, filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch folders"})
+		fmt.Println(err)
 		return
 	}
 	defer cursor.Close(ctx)
@@ -233,9 +234,9 @@ func GetNameSuggestionsForFolder(c *gin.Context) {
 
 	notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
 	filter := bson.M{
-		"folderId":   folderID.Hex(),
-		"ownerId":    firebaseUser.UID,
-		"caption":    bson.M{"$ne": ""},
+		"folderId":      folderID.Hex(),
+		"ownerId":       firebaseUser.UID,
+		"caption":       bson.M{"$ne": ""},
 		"captionStatus": models.CaptionStatusCompleted,
 	}
 

@@ -36,6 +36,7 @@ func AuthMiddleware(client *auth.Client) gin.HandlerFunc {
 		// Store the verified token claims in the context for handlers to use
 		ctx := context.WithValue(c.Request.Context(), userContextKey, token)
 		c.Request = c.Request.WithContext(ctx)
+		c.Set("userId", token.UID)
 		c.Next()
 	}
 }
