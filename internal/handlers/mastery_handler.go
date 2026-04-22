@@ -5,42 +5,43 @@ import (
 	"os"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
 	"cogniscan/backend/internal/database"
 	"cogniscan/backend/internal/models"
+
+	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // FolderMasteryResponse represents the folder mastery response
 type FolderMasteryResponse struct {
 	FolderID       string    `json:"folderId"`
 	UserID         string    `json:"userId"`
-	TotalNotes      int       `json:"totalNotes"`
-	MasteredNotes   int       `json:"masteredNotes"`
+	TotalNotes     int       `json:"totalNotes"`
+	MasteredNotes  int       `json:"masteredNotes"`
 	LearntNotes    int       `json:"learntNotes"`
 	MasteryLevel   string    `json:"masteryLevel"`
 	MasteryPercent float64   `json:"masteryPercent"`
-	LastStudyDate  time.Time  `json:"lastStudyDate"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	LastStudyDate  time.Time `json:"lastStudyDate"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // MasteryUpdateRequest represents a mastery update request
 type MasteryUpdateRequest struct {
-	NoteID string `json:"noteId" binding:"required"`
+	NoteID    string `json:"noteId" binding:"required"`
 	IsCorrect bool   `json:"isCorrect" binding:"required"`
 }
 
 // GetAllFoldersMasteryResponse represents response with all folder mastery data
 type GetAllFoldersMasteryResponse struct {
 	Folders []FolderMasteryResponse `json:"folders"`
-	Total   int                   `json:"total"`
+	Total   int                     `json:"total"`
 }
 
 // GetFolderMastery returns mastery status for a folder
 // @Summary Returns mastery information including total notes, mastered count, and mastery percentage
 func GetFolderMastery(c *gin.Context) {
-	folderID := c.Param("id")
+	folderID := c.Param("folderId")
 	userID := c.GetString("userId")
 	if folderID == "" || userID == "" {
 		c.JSON(400, gin.H{"error": "folderId and userId required"})
@@ -62,14 +63,14 @@ func GetFolderMastery(c *gin.Context) {
 		response := &FolderMasteryResponse{
 			FolderID:       folderMastery.FolderID,
 			UserID:         folderMastery.UserID,
-			TotalNotes:      folderMastery.TotalNotes,
-			MasteredNotes:   folderMastery.MasteredNotes,
+			TotalNotes:     folderMastery.TotalNotes,
+			MasteredNotes:  folderMastery.MasteredNotes,
 			LearntNotes:    folderMastery.LearntNotes,
-			MasteryLevel:    folderMastery.MasteryLevel,
-			MasteryPercent:   folderMastery.MasteryPercent,
-			LastStudyDate:   folderMastery.LastStudyDate,
-			CreatedAt:       folderMastery.CreatedAt,
-			UpdatedAt:       folderMastery.UpdatedAt,
+			MasteryLevel:   folderMastery.MasteryLevel,
+			MasteryPercent: folderMastery.MasteryPercent,
+			LastStudyDate:  folderMastery.LastStudyDate,
+			CreatedAt:      folderMastery.CreatedAt,
+			UpdatedAt:      folderMastery.UpdatedAt,
 		}
 		c.JSON(200, response)
 		return
@@ -124,14 +125,14 @@ func GetFolderMastery(c *gin.Context) {
 	response := &FolderMasteryResponse{
 		FolderID:       folderID,
 		UserID:         userID,
-		TotalNotes:      totalNotes,
-		MasteredNotes:   masteredNotes,
+		TotalNotes:     totalNotes,
+		MasteredNotes:  masteredNotes,
 		LearntNotes:    learntNotes,
-		MasteryLevel:    masteryLevel,
-		MasteryPercent:   masteryPercent,
-		LastStudyDate:   lastStudyDate,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		MasteryLevel:   masteryLevel,
+		MasteryPercent: masteryPercent,
+		LastStudyDate:  lastStudyDate,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 
 	c.JSON(200, response)
@@ -197,14 +198,14 @@ func GetAllFoldersMastery(c *gin.Context) {
 			folderMasteryResponses = append(folderMasteryResponses, FolderMasteryResponse{
 				FolderID:       mastery.FolderID,
 				UserID:         mastery.UserID,
-				TotalNotes:      mastery.TotalNotes,
-				MasteredNotes:   mastery.MasteredNotes,
+				TotalNotes:     mastery.TotalNotes,
+				MasteredNotes:  mastery.MasteredNotes,
 				LearntNotes:    mastery.LearntNotes,
-				MasteryLevel:    mastery.MasteryLevel,
-				MasteryPercent:   mastery.MasteryPercent,
-				LastStudyDate:   mastery.LastStudyDate,
-				CreatedAt:       mastery.CreatedAt,
-				UpdatedAt:       mastery.UpdatedAt,
+				MasteryLevel:   mastery.MasteryLevel,
+				MasteryPercent: mastery.MasteryPercent,
+				LastStudyDate:  mastery.LastStudyDate,
+				CreatedAt:      mastery.CreatedAt,
+				UpdatedAt:      mastery.UpdatedAt,
 			})
 		}
 	}
@@ -242,7 +243,7 @@ func UpdateNoteMastery(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"message":   "Mastery updated",
-		"noteId":   req.NoteID,
+		"noteId":    req.NoteID,
 		"isCorrect": req.IsCorrect,
 	})
 }

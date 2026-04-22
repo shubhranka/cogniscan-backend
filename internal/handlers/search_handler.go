@@ -11,39 +11,40 @@ import (
 	"cogniscan/backend/internal/database"
 	"cogniscan/backend/internal/middleware"
 	"cogniscan/backend/internal/models"
+
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
 // SearchResultItem defines a generic structure for search results.
 type SearchResultItem struct {
-	Type          string    `json:"type"`
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	ParentID      string    `json:"parentId,omitempty"` // For folders
-	MegaURL       string    `json:"megaUrl,omitempty"`  // For notes
-	FolderID      string    `json:"folderId,omitempty"` // For notes
-	CreatedAt     time.Time `json:"createdAt"`
+	Type      string    `json:"type"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	ParentID  string    `json:"parentId,omitempty"` // For folders
+	MegaURL   string    `json:"megaUrl,omitempty"`  // For notes
+	FolderID  string    `json:"folderId,omitempty"` // For notes
+	CreatedAt time.Time `json:"createdAt"`
 
 	// New fields for redesign relevance and mastery
-	Relevance     float64   `json:"relevance"`       // 0-1 relevance score
-	MasteryLevel  string    `json:"masteryLevel"`  // "Mastered", "Learnt", "Review Soon"
-	MasteryPercent float64   `json:"masteryPercent"` // 0-1 mastery percentage
-	ThumbnailURL  string    `json:"thumbnailUrl,omitempty"` // For notes with images
+	Relevance      float64 `json:"relevance"`              // 0-1 relevance score
+	MasteryLevel   string  `json:"masteryLevel"`           // "Mastered", "Learnt", "Review Soon"
+	MasteryPercent float64 `json:"masteryPercent"`         // 0-1 mastery percentage
+	ThumbnailURL   string  `json:"thumbnailUrl,omitempty"` // For notes with images
 }
 
 // SearchInsight represents AI-generated insight for search results
 type SearchInsight struct {
-	Summary      string   `json:"summary"`      // Contextual summary of results
+	Summary       string   `json:"summary"`       // Contextual summary of results
 	RelatedTopics []string `json:"relatedTopics"` // Related topics to explore
-	Suggestion   string   `json:"suggestion"`   // Suggested follow-up action
+	Suggestion    string   `json:"suggestion"`    // Suggested follow-up action
 }
 
 // SearchResponse represents the enhanced search response
 type SearchResponse struct {
 	Items   []SearchResultItem `json:"items"`
-	Insight *SearchInsight      `json:"insight,omitempty"`
-	Total   int                 `json:"total"`
+	Insight *SearchInsight     `json:"insight,omitempty"`
+	Total   int                `json:"total"`
 }
 
 // SearchItems searches for folders and notes matching a query with relevance scoring.
@@ -75,8 +76,8 @@ func SearchItems(c *gin.Context) {
 		defer wg.Done()
 		foldersCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("folders")
 		filter := bson.M{
-			"ownerId": firebaseUser.UID,
-			"name":     bson.M{"$regex": query, "$options": "i"}, // Case-insensitive regex search
+			"ownerId": firebaseUser.Claims["email"],
+			"name":    bson.M{"$regex": query, "$options": "i"}, // Case-insensitive regex search
 		}
 		cursor, err := foldersCollection.Find(ctx, filter)
 		if err != nil {
@@ -106,7 +107,7 @@ func SearchItems(c *gin.Context) {
 		defer wg.Done()
 		notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
 		filter := bson.M{
-			"ownerId": firebaseUser.UID,
+			"ownerId": firebaseUser.Claims["email"],
 			"$or": []bson.M{
 				{"name": bson.M{"$regex": query, "$options": "i"}},
 				{"caption": bson.M{"$regex": query, "$options": "i"}},
@@ -158,9 +159,9 @@ func SearchItems(c *gin.Context) {
 	var insight *SearchInsight
 	if len(results) > 0 {
 		insight = &SearchInsight{
-			Summary:      "Based on your search for \"" + query + "\", you might want to revisit your notes on related topics in this folder.",
+			Summary:       "Based on your search for \"" + query + "\", you might want to revisit your notes on related topics in this folder.",
 			RelatedTopics: []string{"Backpropagation Fundamentals", "Neural Architecture", "Optimization Techniques"},
-			Suggestion:   "Generate a quiz for the top 5 results",
+			Suggestion:    "Generate a quiz for the top 5 results",
 		}
 	}
 

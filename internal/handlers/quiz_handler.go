@@ -26,11 +26,11 @@ type CreateQuizResponse struct {
 // SessionData represents a live quiz session with tracking
 type SessionData struct {
 	SessionID      string    `json:"sessionId"`
-	UserID        string    `json:"userId"`
-	QuizID        string    `json:"quizId"`
-	FolderID      string    `json:"folderId"`
-	StartedAt     time.Time `json:"startedAt"`
-	TotalQuestions int      `json:"totalQuestions"`
+	UserID         string    `json:"userId"`
+	QuizID         string    `json:"quizId"`
+	FolderID       string    `json:"folderId"`
+	StartedAt      time.Time `json:"startedAt"`
+	TotalQuestions int       `json:"totalQuestions"`
 }
 
 // SessionStatistics represents live statistics for a quiz session
@@ -49,8 +49,8 @@ type SessionStatistics struct {
 // SubmitAnswerWithSessionPayload extends SubmitAnswerPayload with session tracking
 type SubmitAnswerWithSessionPayload struct {
 	SelectedOption int    `json:"selectedOption"`
-	TimeTaken      int    `json:"timeTaken"` // seconds, optional
-	SessionID      string `json:"sessionId"` // optional, for session tracking
+	TimeTaken      int    `json:"timeTaken"`    // seconds, optional
+	SessionID      string `json:"sessionId"`    // optional, for session tracking
 	IsNeuralMode   bool   `json:"isNeuralMode"` // optional, indicates Neural Assessment Mode
 }
 
@@ -64,7 +64,7 @@ func CreateQuiz(c *gin.Context) {
 
 	folderID := c.Param("folderId")
 
-	quiz, questions, err := services.CreateQuizForFolder(c.Request.Context(), folderID, firebaseUser.UID, false)
+	quiz, questions, err := services.CreateQuizForFolder(c.Request.Context(), folderID, firebaseUser.Claims["email"].(string), false)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -89,7 +89,7 @@ func RequestQuizGeneration(c *gin.Context) {
 	folderID := c.Param("folderId")
 
 	// Check if a quiz is already being generated
-	status, err := services.GetFolderQuizStatus(c.Request.Context(), folderID, firebaseUser.UID)
+	status, err := services.GetFolderQuizStatus(c.Request.Context(), folderID, firebaseUser.Claims["email"].(string))
 	if err == nil && (status.Status == models.QuizGenStatusPending || status.Status == models.QuizGenStatusProcessing) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Quiz generation already in progress"})
 		return
@@ -111,7 +111,7 @@ func RequestQuizGeneration(c *gin.Context) {
 	job := queue.QuizJob{
 		ID:       jobID,
 		FolderID: folderID,
-		OwnerID:  firebaseUser.UID,
+		OwnerID:  firebaseUser.Claims["email"].(string),
 	}
 
 	// Enqueue job
@@ -121,14 +121,14 @@ func RequestQuizGeneration(c *gin.Context) {
 	}
 
 	// Update folder status to pending
-	if err := services.UpdateFolderQuizStatus(c.Request.Context(), folderID, firebaseUser.UID, models.QuizGenStatusPending, "", ""); err != nil {
+	if err := services.UpdateFolderQuizStatus(c.Request.Context(), folderID, firebaseUser.Claims["email"].(string), models.QuizGenStatusPending, "", ""); err != nil {
 		log.Printf("Failed to update folder quiz status: %v", err)
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"status":   "queued",
-		"jobId":    jobID,
-		"message":  "Quiz generation started",
+		"status":  "queued",
+		"jobId":   jobID,
+		"message": "Quiz generation started",
 	})
 }
 
@@ -142,7 +142,7 @@ func GetQuizStatus(c *gin.Context) {
 
 	folderID := c.Param("folderId")
 
-	status, err := services.GetFolderQuizStatus(c.Request.Context(), folderID, firebaseUser.UID)
+	status, err := services.GetFolderQuizStatus(c.Request.Context(), folderID, firebaseUser.Claims["email"].(string))
 	if err != nil {
 		// If folder not found or no status, return default
 		c.JSON(http.StatusOK, gin.H{
@@ -165,7 +165,7 @@ func GetQuiz(c *gin.Context) {
 
 	quizID := c.Param("quizId")
 
-	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.UID)
+	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.Claims["email"].(string))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Quiz not found"})
 		return
@@ -185,7 +185,7 @@ func GetQuizQuestions(c *gin.Context) {
 	quizID := c.Param("quizId")
 
 	// Verify quiz ownership
-	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.UID)
+	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.Claims["email"].(string))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Quiz not found"})
 		return
@@ -209,11 +209,11 @@ type SubmitAnswerPayload struct {
 }
 
 type AnswerResponse struct {
-	IsCorrect       bool     `json:"isCorrect"`
-	Explanation     string   `json:"explanation"`
-	CorrectOption   int      `json:"correctOption"`
-	SessionStats    *SessionStatistics `json:"sessionStats,omitempty"` // Live session statistics if session tracking enabled
-	AdaptiveFeedback string  `json:"adaptiveFeedback,omitempty"` // AI-generated adaptive feedback in Neural Assessment Mode
+	IsCorrect        bool               `json:"isCorrect"`
+	Explanation      string             `json:"explanation"`
+	CorrectOption    int                `json:"correctOption"`
+	SessionStats     *SessionStatistics `json:"sessionStats,omitempty"`     // Live session statistics if session tracking enabled
+	AdaptiveFeedback string             `json:"adaptiveFeedback,omitempty"` // AI-generated adaptive feedback in Neural Assessment Mode
 }
 
 // SubmitAnswer records an answer to a question with optional session tracking for Neural Assessment Mode
@@ -255,7 +255,7 @@ func SubmitAnswer(c *gin.Context) {
 	}
 
 	// Check if question belongs to user's quiz
-	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.UID)
+	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.Claims["email"].(string))
 	if err != nil || question.QuizID != quiz.ID.Hex() {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
@@ -271,7 +271,7 @@ func SubmitAnswer(c *gin.Context) {
 		c.Request.Context(),
 		bson.M{
 			"questionId": questionID,
-			"userId":     firebaseUser.UID,
+			"userId":     firebaseUser.Claims["email"].(string),
 		},
 	).Decode(&existingAnswer)
 
@@ -280,7 +280,7 @@ func SubmitAnswer(c *gin.Context) {
 	// Save answer
 	answer := &models.QuestionAnswer{
 		QuestionID:     questionID,
-		UserID:         firebaseUser.UID,
+		UserID:         firebaseUser.Claims["email"].(string),
 		SelectedOption: payload.SelectedOption,
 		IsCorrect:      isCorrect,
 		TimeTaken:      payload.TimeTaken,
@@ -294,7 +294,7 @@ func SubmitAnswer(c *gin.Context) {
 	}
 
 	// Update review data for referenced notes
-	if err := services.ProcessQuestionAnswer(c.Request.Context(), question, firebaseUser.UID, isCorrect, payload.TimeTaken); err != nil {
+	if err := services.ProcessQuestionAnswer(c.Request.Context(), question, firebaseUser.Claims["email"].(string), isCorrect, payload.TimeTaken); err != nil {
 		// Log error but don't fail the request
 		// Review data is secondary
 	}
@@ -306,7 +306,7 @@ func SubmitAnswer(c *gin.Context) {
 
 	if useEnhanced {
 		// Get existing session data from Redis
-		existingSession, err := cache.GetActiveSession(firebaseUser.UID)
+		existingSession, err := cache.GetActiveSession(firebaseUser.Claims["email"].(string))
 		if err == nil && existingSession != nil {
 			// Get existing cumulative time
 			existingTotalTime := getInt(existingSession, "totalTime", 0)
@@ -331,11 +331,11 @@ func SubmitAnswer(c *gin.Context) {
 
 		// Store updated session data in Redis
 		sessionData := map[string]interface{}{
-			"sessionId":      sessionStats.SessionID,
-			"userId":        firebaseUser.UID,
+			"sessionId":     sessionStats.SessionID,
+			"userId":        firebaseUser.Claims["email"].(string),
 			"quizId":        quizID,
 			"folderId":      quiz.FolderID,
-			"totalAnswered":  sessionStats.TotalAnswered,
+			"totalAnswered": sessionStats.TotalAnswered,
 			"correctCount":  sessionStats.CorrectCount,
 			"accuracy":      sessionStats.Accuracy,
 			"averageSpeed":  sessionStats.AverageSpeed,
@@ -344,7 +344,7 @@ func SubmitAnswer(c *gin.Context) {
 			"isNeuralMode":  sessionStats.IsNeuralMode,
 			"totalTime":     cumulativeTotalTime,
 		}
-		if err := cache.SetActiveSession(firebaseUser.UID, enhancedPayload.SessionID, sessionData); err != nil {
+		if err := cache.SetActiveSession(firebaseUser.Claims["email"].(string), enhancedPayload.SessionID, sessionData); err != nil {
 			log.Printf("Failed to store session data in Redis: %v", err)
 		}
 
@@ -372,10 +372,10 @@ func SubmitAnswer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, AnswerResponse{
-		IsCorrect:       isCorrect,
-		Explanation:     question.Explanation,
-		CorrectOption:   question.CorrectOption,
-		SessionStats:    sessionStats,
+		IsCorrect:        isCorrect,
+		Explanation:      question.Explanation,
+		CorrectOption:    question.CorrectOption,
+		SessionStats:     sessionStats,
 		AdaptiveFeedback: adaptiveFeedback,
 	})
 }
@@ -390,7 +390,7 @@ func GetQuizSummary(c *gin.Context) {
 
 	quizID := c.Param("quizId")
 
-	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.UID)
+	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.Claims["email"].(string))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Quiz not found"})
 		return
@@ -422,7 +422,7 @@ func RegenerateQuiz(c *gin.Context) {
 	quizID := c.Param("quizId")
 
 	// Get quiz to find folder ID
-	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.UID)
+	quiz, err := services.GetQuiz(c.Request.Context(), quizID, firebaseUser.Claims["email"].(string))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Quiz not found"})
 		return
@@ -450,7 +450,7 @@ func RegenerateQuiz(c *gin.Context) {
 			answerCollection := services.GetAnswerCollection()
 			answerCollection.DeleteMany(c.Request.Context(), bson.M{
 				"questionId": bson.M{"$in": questionIDs},
-				"userId":      firebaseUser.UID,
+				"userId":     firebaseUser.Claims["email"].(string),
 			})
 		}
 	}
@@ -460,14 +460,14 @@ func RegenerateQuiz(c *gin.Context) {
 
 	// Delete the quiz document
 	quizzesCollection := services.GetQuizCollection()
-	quizzesCollection.DeleteOne(c.Request.Context(), bson.M{"_id": quiz.ID, "ownerId": firebaseUser.UID})
+	quizzesCollection.DeleteOne(c.Request.Context(), bson.M{"_id": quiz.ID, "ownerId": firebaseUser.Claims["email"].(string)})
 
 	// Create job for regeneration
 	jobID := uuid.New().String()
 	job := queue.QuizJob{
 		ID:       jobID,
 		FolderID: folderID,
-		OwnerID:  firebaseUser.UID,
+		OwnerID:  firebaseUser.Claims["email"].(string),
 	}
 
 	// Enqueue job
@@ -480,7 +480,7 @@ func RegenerateQuiz(c *gin.Context) {
 	if err := services.UpdateFolderQuizStatus(
 		c.Request.Context(),
 		folderID,
-		firebaseUser.UID,
+		firebaseUser.Claims["email"].(string),
 		models.QuizGenStatusPending,
 		"",
 		"",

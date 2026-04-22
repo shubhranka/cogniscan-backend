@@ -41,7 +41,7 @@ func CreateFolder(c *gin.Context) {
 		ID:       primitive.NewObjectID(),
 		Name:     payload.Name,
 		ParentID: payload.ParentID,
-		OwnerID:  firebaseUser.UID,
+		OwnerID:  firebaseUser.Claims["email"].(string),
 	}
 	foldersCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("folders")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -69,7 +69,7 @@ func GetFolders(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	filter := bson.M{
-		"ownerId":  firebaseUser.UID,
+		"ownerId":  firebaseUser.Claims["email"],
 		"parentId": parentID,
 	}
 	cursor, err := foldersCollection.Find(ctx, filter)
@@ -115,7 +115,7 @@ func UpdateFolder(c *gin.Context) {
 	foldersCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("folders")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	filter := bson.M{"_id": folderID, "ownerId": firebaseUser.UID}
+	filter := bson.M{"_id": folderID, "ownerId": firebaseUser.Claims["email"]}
 	update := bson.M{"$set": bson.M{"name": payload.Name}}
 	result, err := foldersCollection.UpdateOne(ctx, filter, update)
 	if err != nil {
@@ -144,14 +144,14 @@ func DeleteFolder(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	err = deleteFolderRecursively(ctx, folderIDHex, firebaseUser.UID)
+	err = deleteFolderRecursively(ctx, folderIDHex, firebaseUser.Claims["email"].(string))
 	if err != nil {
 		log.Printf("Error during recursive delete: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete folder and its contents"})
 		return
 	}
 	foldersCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("folders")
-	_, err = foldersCollection.DeleteOne(ctx, bson.M{"_id": folderID, "ownerId": firebaseUser.UID})
+	_, err = foldersCollection.DeleteOne(ctx, bson.M{"_id": folderID, "ownerId": firebaseUser.Claims["email"]})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete the main folder"})
 		return
@@ -235,7 +235,7 @@ func GetNameSuggestionsForFolder(c *gin.Context) {
 	notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
 	filter := bson.M{
 		"folderId":      folderID.Hex(),
-		"ownerId":       firebaseUser.UID,
+		"ownerId":       firebaseUser.Claims["email"],
 		"caption":       bson.M{"$ne": ""},
 		"captionStatus": models.CaptionStatusCompleted,
 	}

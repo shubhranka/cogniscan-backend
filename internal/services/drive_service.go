@@ -11,7 +11,6 @@ import (
 	"os"
 
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 )
@@ -87,16 +86,17 @@ func InitDriveService() error {
 		return fmt.Errorf("COGNI_BACKEND environment variable not set")
 	}
 
-	// Use google.ConfigFromJSON instead of JWTConfigFromJSON
-	config, err := google.ConfigFromJSON([]byte(credentialsJSONString), drive.DriveFileScope)
-	if err != nil {
-		return fmt.Errorf("unable to parse client secret to config: %v", err)
-	}
+	// // Use google.ConfigFromJSON instead of JWTConfigFromJSON
+	// config, err := google.ConfigFromJSON([]byte(credentialsJSONString), drive.DriveFileScope)
+	// if err != nil {
+	// 	return fmt.Errorf("unable to parse client secret to config: %v", err)
+	// }
 
-	// This handles the interactive login and creates/reads token.json
-	client := getClient(config)
+	// // This handles the interactive login and creates/reads token.json
+	// client := getClient(config)
 
-	srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	// srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	srv, err := drive.NewService(ctx, option.WithCredentialsFile("service-account.json"))
 	if err != nil {
 		return fmt.Errorf("unable to retrieve Drive client: %v", err)
 	}

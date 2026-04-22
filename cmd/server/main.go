@@ -30,15 +30,28 @@ func main() {
 	database.ConnectDB()
 
 	// Check if token.json exists, if not create it
-	if _, err := os.Stat("token.json"); os.IsNotExist(err) {
-		token := os.Getenv("COGNI_GOOGLE_TOKEN")
+	if _, err := os.Stat("service-account.json"); os.IsNotExist(err) {
+		token := os.Getenv("KEY_DATA_N")
 		if token == "" {
-			log.Println("COGNI_GOOGLE_TOKEN environment variable not set")
+			log.Println("KEY_DATA_N environment variable not set")
 			return
 		}
-		err := os.WriteFile("token.json", []byte(token), 0644)
+
+		var tokenJson map[string]interface{}
+		err = json.Unmarshal([]byte(token), &tokenJson)
 		if err != nil {
-			log.Fatalf("error writing token.json: %v\n", err)
+			log.Fatalf("error parsing service-account.json: %v\n", err)
+		}
+		tokenJson["private_key"] = strings.ReplaceAll(tokenJson["private_key"].(string), "\\n", "\n")
+
+		tokenBytes, err := json.Marshal(tokenJson)
+		if err != nil {
+			log.Fatalf("error marshaling service-account.json: %v\n", err)
+		}
+
+		err = os.WriteFile("service-account.json", tokenBytes, 0644)
+		if err != nil {
+			log.Fatalf("error writing service-account.json: %v\n", err)
 		}
 	}
 

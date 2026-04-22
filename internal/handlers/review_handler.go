@@ -13,17 +13,17 @@ import (
 )
 
 type ReviewItem struct {
-	ReviewID     string    `json:"reviewId"`
-	NoteID       string    `json:"noteId"`
-	NoteName     string    `json:"noteName"`
-	PublicURL    string    `json:"publicUrl"`
-	EaseFactor   float32   `json:"easeFactor"`
-	Interval     int       `json:"interval"`
-	Repetitions  int       `json:"repetitions"`
-	NextReview   string    `json:"nextReview"`
-	ToReview     bool      `json:"toReview"`
-	TotalReviews int       `json:"totalReviews"`
-	SuccessRate  float64   `json:"successRate"`
+	ReviewID     string  `json:"reviewId"`
+	NoteID       string  `json:"noteId"`
+	NoteName     string  `json:"noteName"`
+	PublicURL    string  `json:"publicUrl"`
+	EaseFactor   float32 `json:"easeFactor"`
+	Interval     int     `json:"interval"`
+	Repetitions  int     `json:"repetitions"`
+	NextReview   string  `json:"nextReview"`
+	ToReview     bool    `json:"toReview"`
+	TotalReviews int     `json:"totalReviews"`
+	SuccessRate  float64 `json:"successRate"`
 }
 
 // GetReviewQueue returns notes due for review
@@ -41,7 +41,7 @@ func GetReviewQueue(c *gin.Context) {
 		}
 	}
 
-	reviews, err := services.GetReviewQueue(c.Request.Context(), firebaseUser.UID, limit)
+	reviews, err := services.GetReviewQueue(c.Request.Context(), firebaseUser.Claims["email"].(string), limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get review queue"})
 		return
@@ -107,7 +107,7 @@ func GetNoteReviewHistory(c *gin.Context) {
 
 	noteID := c.Param("noteId")
 
-	review, err := services.GetNoteReviewHistory(c.Request.Context(), noteID, firebaseUser.UID)
+	review, err := services.GetNoteReviewHistory(c.Request.Context(), noteID, firebaseUser.Claims["email"].(string))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Review not found"})
 		return
@@ -130,7 +130,7 @@ func UpdateReviewStatus(c *gin.Context) {
 		return
 	}
 
-	err := services.UpdateReviewStatus(c.Request.Context(), noteID, firebaseUser.UID)
+	err := services.UpdateReviewStatus(c.Request.Context(), noteID, firebaseUser.Claims["email"].(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update review status"})
 		return

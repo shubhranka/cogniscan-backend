@@ -69,7 +69,7 @@ func CreateNote(c *gin.Context) {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 		FolderID:      folderId,
-		OwnerID:       firebaseUser.UID,
+		OwnerID:       firebaseUser.Claims["email"].(string),
 	}
 	notesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("notes")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -116,7 +116,7 @@ func GetNoteImage(c *gin.Context) {
 	defer cancel()
 
 	var note models.Note
-	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.UID}
+	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.Claims["email"]}
 	if err := notesCollection.FindOne(ctx, filter).Decode(&note); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found or you don't have permission"})
 		return
@@ -163,7 +163,7 @@ func GetNotesInFolder(c *gin.Context) {
 	defer cancel()
 
 	filter := bson.M{
-		"ownerId":  firebaseUser.UID,
+		"ownerId":  firebaseUser.Claims["email"],
 		"folderId": parentID,
 	}
 
@@ -218,7 +218,7 @@ func UpdateNote(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.UID}
+	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.Claims["email"]}
 	update := bson.M{"$set": bson.M{"name": payload.Name}}
 
 	result, err := notesCollection.UpdateOne(ctx, filter, update)
@@ -253,7 +253,7 @@ func DeleteNote(c *gin.Context) {
 
 	// Find the note to get its DriveID
 	var noteToDelete models.Note
-	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.UID}
+	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.Claims["email"]}
 	err = notesCollection.FindOne(ctx, filter).Decode(&noteToDelete)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
@@ -297,7 +297,7 @@ func RegenerateCaption(c *gin.Context) {
 	defer cancel()
 
 	var note models.Note
-	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.UID}
+	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.Claims["email"]}
 	if err := notesCollection.FindOne(ctx, filter).Decode(&note); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found or you don't have permission"})
 		return
@@ -354,7 +354,7 @@ func GetNameSuggestionsForNote(c *gin.Context) {
 	defer cancel()
 
 	var note models.Note
-	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.UID}
+	filter := bson.M{"_id": noteID, "ownerId": firebaseUser.Claims["email"]}
 	if err := notesCollection.FindOne(ctx, filter).Decode(&note); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found or access denied"})
 		return
