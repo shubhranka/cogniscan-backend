@@ -20,12 +20,24 @@ var redisInstance *RedisClient
 
 // InitRedis initializes the Redis client
 func InitRedis() error {
-	client := redis.NewClient(&redis.Options{
-		Addr:     getRedisAddr(),
-		Password: getRedisPassword(),
-		DB:         0,
-		PoolSize:   10,
-	})
+	redisURL := os.Getenv("REDIS_URL")
+
+	var client *redis.Client
+	if redisURL != "" {
+		opt, err := redis.ParseURL(redisURL)
+		if err != nil {
+			return fmt.Errorf("failed to parse REDIS_URL: %w", err)
+		}
+		client = redis.NewClient(opt)
+	} else {
+		// Fallback to REDIS_ADDR/REDIS_PASSWORD
+		client = redis.NewClient(&redis.Options{
+			Addr:     getRedisAddr(),
+			Password: getRedisPassword(),
+			DB:       0,
+			PoolSize: 10,
+		})
+	}
 
 	redisInstance = &RedisClient{
 		client: client,

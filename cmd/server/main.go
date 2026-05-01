@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"cogniscan/backend/internal/cache"
 	"cogniscan/backend/internal/database"
 	"cogniscan/backend/internal/handlers"
 	"cogniscan/backend/internal/middleware"
@@ -28,6 +29,11 @@ func main() {
 
 	// Initialize Database
 	database.ConnectDB()
+
+	if err := cache.InitRedis(); err != nil {
+		log.Printf("Warning: Failed to initialize Redis: %v", err)
+		// Continue without Redis - graceful degradation
+	}
 
 	// Check if token.json exists, if not create it
 	if _, err := os.Stat("service-account.json"); os.IsNotExist(err) {
