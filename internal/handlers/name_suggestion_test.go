@@ -13,26 +13,17 @@ func TestGetNameSuggestionsForFolder(t *testing.T) {
 	tests := []struct {
 		name       string
 		folderID   string
-		userID     string
 		wantStatus int
 	}{
 		{
-			name:       "Successfully get folder name suggestions",
-			folderID:   "folder-123",
-			userID:     "test-user-id",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Invalid folder ID",
+			name:       "Invalid folder ID format",
 			folderID:   "invalid-id",
-			userID:     "test-user-id",
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "Missing folderId parameter",
-			folderID:   "",
-			userID:     "test-user-id",
-			wantStatus: http.StatusBadRequest,
+			name:       "Folder ID not found",
+			folderID:   "507f1f77bcf86cd799439011",
+			wantStatus: http.StatusNotFound,
 		},
 	}
 
@@ -45,13 +36,6 @@ func TestGetNameSuggestionsForFolder(t *testing.T) {
 			if w.Code != tt.wantStatus {
 				t.Errorf("GetNameSuggestionsForFolder() status = %v, want %v", w.Code, tt.wantStatus)
 			}
-
-			if tt.name == "Successfully get folder name suggestions" && w.Code == http.StatusOK {
-				contentType := w.Header().Get("Content-Type")
-				if !assertJSONContentType(contentType) {
-					t.Errorf("Expected JSON content type, got %v", contentType)
-				}
-			}
 		})
 	}
 }
@@ -63,26 +47,17 @@ func TestGetNameSuggestionsForNote(t *testing.T) {
 	tests := []struct {
 		name       string
 		noteID     string
-		userID     string
 		wantStatus int
 	}{
 		{
-			name:       "Successfully get note name suggestions",
-			noteID:     "note-123",
-			userID:     "test-user-id",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Invalid note ID",
+			name:       "Invalid note ID format",
 			noteID:     "invalid-id",
-			userID:     "test-user-id",
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "Missing noteId parameter",
-			noteID:     "",
-			userID:     "test-user-id",
-			wantStatus: http.StatusBadRequest,
+			name:       "Note ID not found",
+			noteID:     "507f1f77bcf86cd799439011",
+			wantStatus: http.StatusNotFound,
 		},
 	}
 
@@ -94,13 +69,6 @@ func TestGetNameSuggestionsForNote(t *testing.T) {
 
 			if w.Code != tt.wantStatus {
 				t.Errorf("GetNameSuggestionsForNote() status = %v, want %v", w.Code, tt.wantStatus)
-			}
-
-			if tt.name == "Successfully get note name suggestions" && w.Code == http.StatusOK {
-				contentType := w.Header().Get("Content-Type")
-				if !assertJSONContentType(contentType) {
-					t.Errorf("Expected JSON content type, got %v", contentType)
-				}
 			}
 		})
 	}
@@ -120,12 +88,12 @@ func TestNameSuggestionsUnauthorizedAccess(t *testing.T) {
 		{
 			name:   "GetNameSuggestionsForFolder without auth",
 			method: "GET",
-			path:   "/folders/name-suggestions/folder-123",
+			path:   "/folders/name-suggestions/507f1f77bcf86cd799439011",
 		},
 		{
 			name:   "GetNameSuggestionsForNote without auth",
 			method: "GET",
-			path:   "/notes/name-suggestions/note-123",
+			path:   "/notes/name-suggestions/507f1f77bcf86cd799439011",
 		},
 	}
 

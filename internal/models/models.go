@@ -233,3 +233,65 @@ type QuizSession struct {
 	StartedAt      time.Time `bson:"startedAt" json:"startedAt"`
 	CompletedAt    time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
 }
+
+// NodeMastery tracks mastery for a node (embedded in Node)
+type NodeMastery struct {
+	TotalNotes      int       `bson:"totalNotes" json:"totalNotes"`
+	MasteredNotes   int       `bson:"masteredNotes" json:"masteredNotes"`
+	LearntNotes     int       `bson:"learntNotes" json:"learntNotes"`
+	MasteryLevel    string    `bson:"masteryLevel" json:"masteryLevel"` // "Mastered", "Learnt", "Review Soon"
+	MasteryPercent  float64   `bson:"masteryPercent" json:"masteryPercent"`
+	LastStudyDate   time.Time `bson:"lastStudyDate" json:"lastStudyDate"`
+	LastUpdated     time.Time `bson:"lastUpdated" json:"lastUpdated"`
+}
+
+// NodeType represents the type of node
+type NodeType string
+
+const (
+	NodeTypeFolder NodeType = "folder"
+	NodeTypeNote   NodeType = "note"
+)
+
+// NodeMetadata contains type-specific metadata
+type NodeMetadata struct {
+	Type    NodeType `bson:"type" json:"type"`
+	DriveID string   `bson:"driveId,omitempty" json:"driveId,omitempty"` // Only for notes
+}
+
+// Node represents a unified structure for both folders and notes
+type Node struct {
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name          string             `bson:"name" json:"name"`
+	ParentID      string             `bson:"parentId" json:"parentId"`
+	Children      []string           `bson:"children" json:"children"`
+	TotalNoteCount int               `bson:"totalNoteCount" json:"totalNoteCount"`
+	Metadata      NodeMetadata       `bson:"metadata" json:"metadata"`
+	OwnerID       string             `bson:"ownerId" json:"ownerId"`
+	CreatedAt     time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt     time.Time          `bson:"updatedAt" json:"updatedAt"`
+
+	// Mastery - embedded per node
+	Mastery NodeMastery `bson:"mastery" json:"mastery"`
+
+	// Folder-specific fields
+	QuizGenerationStatus QuizGenerationStatus `bson:"quizGenerationStatus,omitempty" json:"quizGenerationStatus,omitempty"`
+	QuizID                string              `bson:"quizId,omitempty" json:"quizId,omitempty"`
+	QuizError             string              `bson:"quizError,omitempty" json:"quizError,omitempty"`
+	QuizUpdatedAt         time.Time           `bson:"quizUpdatedAt,omitempty" json:"quizUpdatedAt,omitempty"`
+
+	// Note-specific fields
+	PublicURL string `bson:"publicUrl,omitempty" json:"publicUrl,omitempty"`
+	// Caption data is stored separately in caption_embeddings collection
+}
+
+// MasteryJob represents a job in the mastery update queue
+type MasteryJob struct {
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	NodeID    string             `bson:"nodeId" json:"nodeId"`
+	Status    string             `bson:"status" json:"status"` // "pending", "processing", "completed", "failed"
+	Attempt   int                `bson:"attempt" json:"attempt"`
+	Error     string             `bson:"error,omitempty" json:"error,omitempty"`
+	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
+	ProcessedAt time.Time        `bson:"processedAt,omitempty" json:"processedAt,omitempty"`
+}

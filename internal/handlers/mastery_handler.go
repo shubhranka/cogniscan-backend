@@ -2,17 +2,19 @@ package handlers
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"time"
 
 	"cogniscan/backend/internal/database"
 	"cogniscan/backend/internal/models"
+	"cogniscan/backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// FolderMasteryResponse represents the folder mastery response
+// FolderMasteryResponse represents the folder mastery response (legacy)
 type FolderMasteryResponse struct {
 	FolderID       string    `json:"folderId"`
 	UserID         string    `json:"userId"`
@@ -32,112 +34,382 @@ type MasteryUpdateRequest struct {
 	IsCorrect bool   `json:"isCorrect" binding:"required"`
 }
 
-// GetAllFoldersMasteryResponse represents response with all folder mastery data
-type GetAllFoldersMasteryResponse struct {
-	Folders []FolderMasteryResponse `json:"folders"`
-	Total   int                     `json:"total"`
-}
-
-// GetFolderMastery returns mastery status for a folder
-// @Summary Returns mastery information including total notes, mastered count, and mastery percentage
+// GetFolderMastery is a deprecated wrapper for backward compatibility
+// @Deprecated Use GetNodeMastery with node ID instead
 func GetFolderMastery(c *gin.Context) {
 	folderID := c.Param("folderId")
 	userID := c.GetString("userId")
 	if folderID == "" || userID == "" {
-		c.JSON(400, gin.H{"error": "folderId and userId required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "folderId and userId required"})
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	db := database.Client.Database(os.Getenv("DB_NAME"))
-
-	// Try to fetch existing folder mastery
-	var folderMastery models.FolderMastery
-	collection := db.Collection("folder_mastery")
-	err := collection.FindOne(ctx, bson.M{"folderId": folderID, "userId": userID}).Decode(&folderMastery)
-
-	if err == nil {
-		// Return cached mastery
-		response := &FolderMasteryResponse{
-			FolderID:       folderMastery.FolderID,
-			UserID:         folderMastery.UserID,
-			TotalNotes:     folderMastery.TotalNotes,
-			MasteredNotes:  folderMastery.MasteredNotes,
-			LearntNotes:    folderMastery.LearntNotes,
-			MasteryLevel:   folderMastery.MasteryLevel,
-			MasteryPercent: folderMastery.MasteryPercent,
-			LastStudyDate:  folderMastery.LastStudyDate,
-			CreatedAt:      folderMastery.CreatedAt,
-			UpdatedAt:      folderMastery.UpdatedAt,
-		}
-		c.JSON(200, response)
+	// Get the folder as a node
+	node, err := services.GetNodeByID(ctx, folderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
 		return
 	}
 
-	// If not cached, calculate from note reviews
-	// Get all notes in folder
-	notesCollection := db.Collection("notes")
-	notesCursor, _ := notesCollection.Find(ctx, bson.M{"folderId": folderID, "ownerId": userID})
-	defer notesCursor.Close(ctx)
-
-	var notes []models.Note
-	notesCursor.All(ctx, &notes)
-
-	totalNotes := len(notes)
-	masteredNotes := 0
-	learntNotes := 0
-	var lastStudyDate time.Time
-
-	// Get note reviews for this folder
-	reviewsCollection := db.Collection("note_reviews")
-	reviewsCursor, _ := reviewsCollection.Find(ctx, bson.M{"userId": userID})
-	defer reviewsCursor.Close(ctx)
-
-	var reviews []models.NoteReview
-	reviewsCursor.All(ctx, &reviews)
-
-	// Count mastered and learnt notes based on reviews
-	for _, note := range notes {
-		for _, review := range reviews {
-			if review.NoteID == note.ID.Hex() {
-				if review.Repetitions >= 3 {
-					masteredNotes++
-				} else if review.Repetitions >= 1 {
-					learntNotes++
-				}
-				if review.UpdatedAt.After(lastStudyDate) {
-					lastStudyDate = review.UpdatedAt
-				}
-				break
-			}
-		}
+	// Verify ownership
+	if node.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
 	}
 
-	masteryPercent := 0.0
-	if totalNotes > 0 {
-		masteryPercent = float64(masteredNotes) / float64(totalNotes)
+	// Verify it's a folder
+	if node.Metadata.Type != models.NodeTypeFolder {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Not a folder node"})
+		return
 	}
 
-	masteryLevel := determineMasteryLevel(masteryPercent)
-
-	response := &FolderMasteryResponse{
+	// Return mastery (it's now embedded in the node)
+	response := FolderMasteryResponse{
 		FolderID:       folderID,
 		UserID:         userID,
-		TotalNotes:     totalNotes,
-		MasteredNotes:  masteredNotes,
-		LearntNotes:    learntNotes,
-		MasteryLevel:   masteryLevel,
-		MasteryPercent: masteryPercent,
-		LastStudyDate:  lastStudyDate,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		TotalNotes:     node.Mastery.TotalNotes,
+		MasteredNotes:  node.Mastery.MasteredNotes,
+		LearntNotes:    node.Mastery.LearntNotes,
+		MasteryLevel:   node.Mastery.MasteryLevel,
+		MasteryPercent: node.Mastery.MasteryPercent,
+		LastStudyDate:  node.Mastery.LastStudyDate,
+		CreatedAt:      node.CreatedAt,
+		UpdatedAt:      node.UpdatedAt,
 	}
 
-	c.JSON(200, response)
+	c.JSON(http.StatusOK, response)
 }
 
+// GetAllFoldersMastery is a deprecated wrapper for backward compatibility
+// @Deprecated Use GetAllNodesMastery instead
+func GetAllFoldersMastery(c *gin.Context) {
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "userId required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get all folder nodes owned by user
+	nodesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("nodes")
+	cursor, err := nodesCollection.Find(ctx, bson.M{"ownerId": userID, "metadata.type": models.NodeTypeFolder})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch folders"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var nodes []models.Node
+	if err := cursor.All(ctx, &nodes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode folders"})
+		return
+	}
+
+	// Build response with mastery data
+	foldersMastery := []FolderMasteryResponse{}
+	for _, node := range nodes {
+		foldersMastery = append(foldersMastery, FolderMasteryResponse{
+			FolderID:       node.ID.Hex(),
+			UserID:         node.OwnerID,
+			TotalNotes:     node.Mastery.TotalNotes,
+			MasteredNotes:  node.Mastery.MasteredNotes,
+			LearntNotes:    node.Mastery.LearntNotes,
+			MasteryLevel:   node.Mastery.MasteryLevel,
+			MasteryPercent: node.Mastery.MasteryPercent,
+			LastStudyDate:  node.Mastery.LastStudyDate,
+			CreatedAt:      node.CreatedAt,
+			UpdatedAt:      node.Mastery.LastUpdated,
+		})
+	}
+
+	response := GetAllFoldersMasteryResponse{
+		Folders: foldersMastery,
+		Total:   len(foldersMastery),
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+type GetAllFoldersMasteryResponse struct {
+	Folders []FolderMasteryResponse `json:"folders"`
+	Total   int                     `json:"total"`
+}
+
+// UpdateNoteMastery is a deprecated wrapper for backward compatibility
+// @Deprecated Use ReviewNoteNode in node_handler instead
+func UpdateNoteMastery(c *gin.Context) {
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "userId required"})
+		return
+	}
+
+	var req MasteryUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Verify the note node exists and belongs to user
+	nodesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("nodes")
+	var node models.Node
+	err := nodesCollection.FindOne(ctx, bson.M{"_id": req.NoteID, "ownerId": userID}).Decode(&node)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
+		return
+	}
+
+	if node.Metadata.Type != models.NodeTypeNote {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Can only review note nodes"})
+		return
+	}
+
+	// Update the note review (this also updates the node's mastery)
+	err = services.UpdateNoteReview(ctx, req.NoteID, userID, req.IsCorrect)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update mastery"})
+		return
+	}
+
+	// Enqueue mastery update for ancestors
+	services.EnqueueAncestorMasteryUpdate(req.NoteID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Mastery updated",
+		"noteId":    req.NoteID,
+		"isCorrect": req.IsCorrect,
+	})
+}
+
+// GetNodeMastery returns mastery status for a node
+// @Summary Returns mastery information including total notes, mastered count, and mastery percentage
+func GetNodeMastery(c *gin.Context) {
+	nodeID := c.Param("nodeId")
+	userID := c.GetString("userId")
+	if nodeID == "" || userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nodeId and userId required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get the node
+	node, err := services.GetNodeByID(ctx, nodeID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
+		return
+	}
+
+	// Verify ownership
+	if node.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Return mastery (it's now embedded in the node)
+	response := gin.H{
+		"nodeId":        nodeID,
+		"totalNotes":     node.Mastery.TotalNotes,
+		"masteredNotes":  node.Mastery.MasteredNotes,
+		"learntNotes":    node.Mastery.LearntNotes,
+		"masteryLevel":   node.Mastery.MasteryLevel,
+		"masteryPercent": node.Mastery.MasteryPercent,
+		"lastStudyDate":  node.Mastery.LastStudyDate,
+		"lastUpdated":    node.Mastery.LastUpdated,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// GetAllNodesMastery returns mastery for all user nodes
+// @Summary Returns mastery data for all nodes belonging to the user
+func GetAllNodesMastery(c *gin.Context) {
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "userId required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get all nodes owned by user
+	nodesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("nodes")
+	cursor, err := nodesCollection.Find(ctx, bson.M{"ownerId": userID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch nodes"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var nodes []models.Node
+	if err := cursor.All(ctx, &nodes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode nodes"})
+		return
+	}
+
+	// Build response with mastery data
+	nodesMastery := []gin.H{}
+	for _, node := range nodes {
+		// Only include nodes that have mastery data (folders and notes)
+		nodesMastery = append(nodesMastery, gin.H{
+			"nodeId":        node.ID.Hex(),
+			"type":          node.Metadata.Type,
+			"name":          node.Name,
+			"parentId":      node.ParentID,
+			"totalNotes":     node.Mastery.TotalNotes,
+			"masteredNotes":  node.Mastery.MasteredNotes,
+			"learntNotes":    node.Mastery.LearntNotes,
+			"masteryLevel":   node.Mastery.MasteryLevel,
+			"masteryPercent": node.Mastery.MasteryPercent,
+			"lastStudyDate":  node.Mastery.LastStudyDate,
+			"lastUpdated":    node.Mastery.LastUpdated,
+		})
+	}
+
+	response := gin.H{
+		"nodes": nodesMastery,
+		"total": len(nodesMastery),
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// RefreshNodeMastery forces a mastery recalculation for a node and its ancestors
+// @Summary Forces mastery refresh for a node (useful for debugging or manual sync)
+func RefreshNodeMastery(c *gin.Context) {
+	nodeID := c.Param("nodeId")
+	userID := c.GetString("userId")
+	if nodeID == "" || userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nodeId and userId required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Verify ownership
+	nodesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("nodes")
+	var node models.Node
+	err := nodesCollection.FindOne(ctx, bson.M{"_id": nodeID, "ownerId": userID}).Decode(&node)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
+		return
+	}
+
+	// Update mastery for this node
+	err = services.UpdateNodeMastery(ctx, nodeID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to refresh mastery"})
+		return
+	}
+
+	// Trigger background update for ancestors (if not root)
+	if node.ParentID != "" {
+		services.EnqueueAncestorMasteryUpdate(nodeID)
+	}
+
+	// Get updated node
+	updatedNode, err := services.GetNodeByID(ctx, nodeID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch updated node"})
+		return
+	}
+
+	response := gin.H{
+		"nodeId":        nodeID,
+		"totalNotes":     updatedNode.Mastery.TotalNotes,
+		"masteredNotes":  updatedNode.Mastery.MasteredNotes,
+		"learntNotes":    updatedNode.Mastery.LearntNotes,
+		"masteryLevel":   updatedNode.Mastery.MasteryLevel,
+		"masteryPercent": updatedNode.Mastery.MasteryPercent,
+		"lastStudyDate":  updatedNode.Mastery.LastStudyDate,
+		"lastUpdated":    updatedNode.Mastery.LastUpdated,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// GetMasteryStats returns aggregate mastery statistics for the user
+// @Summary Returns overall mastery statistics across all nodes
+func GetMasteryStats(c *gin.Context) {
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "userId required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get all nodes owned by user
+	nodesCollection := database.Client.Database(os.Getenv("DB_NAME")).Collection("nodes")
+	cursor, err := nodesCollection.Find(ctx, bson.M{"ownerId": userID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch nodes"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var nodes []models.Node
+	if err := cursor.All(ctx, &nodes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode nodes"})
+		return
+	}
+
+	// Calculate aggregate stats
+	var (
+		totalNotes     int
+		masteredNotes  int
+		learntNotes    int
+		totalFolders   int
+		totalNoteNodes int
+	)
+
+	for _, node := range nodes {
+		if node.Metadata.Type == models.NodeTypeFolder {
+			totalFolders++
+		} else if node.Metadata.Type == models.NodeTypeNote {
+			totalNoteNodes++
+		}
+
+		// Use mastery from each node (for folders, this aggregates children)
+		totalNotes += node.Mastery.TotalNotes
+		masteredNotes += node.Mastery.MasteredNotes
+		learntNotes += node.Mastery.LearntNotes
+	}
+
+	// Calculate overall mastery level
+	overallMasteryPercent := 0.0
+	if totalNotes > 0 {
+		overallMasteryPercent = float64(masteredNotes) / float64(totalNotes)
+	}
+	overallMasteryLevel := determineMasteryLevel(overallMasteryPercent)
+
+	response := gin.H{
+		"totalNodes":     len(nodes),
+		"totalFolders":    totalFolders,
+		"totalNoteNodes":  totalNoteNodes,
+		"totalNotes":     totalNotes,
+		"masteredNotes":  masteredNotes,
+		"learntNotes":    learntNotes,
+		"masteryLevel":   overallMasteryLevel,
+		"masteryPercent": overallMasteryPercent,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// determineMasteryLevel returns the mastery level based on percentage
 func determineMasteryLevel(percent float64) string {
 	if percent > 0.8 {
 		return "Mastered"
@@ -145,105 +417,4 @@ func determineMasteryLevel(percent float64) string {
 		return "Learnt"
 	}
 	return "Review Soon"
-}
-
-// GetAllFoldersMastery returns mastery for all user folders
-// @Summary Returns mastery data for all folders belonging to the user
-func GetAllFoldersMastery(c *gin.Context) {
-	userID := c.GetString("userId")
-	if userID == "" {
-		c.JSON(400, gin.H{"error": "userId required"})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	db := database.Client.Database(os.Getenv("DB_NAME"))
-
-	// Get all folders owned by user
-	foldersCollection := db.Collection("folders")
-	cursor, err := foldersCollection.Find(ctx, bson.M{"ownerId": userID})
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to fetch folders"})
-		return
-	}
-	defer cursor.Close(ctx)
-
-	var folders []models.Folder
-	if err := cursor.All(ctx, &folders); err != nil {
-		c.JSON(500, gin.H{"error": "Failed to decode folders"})
-		return
-	}
-
-	// Get folder mastery records
-	masteryCollection := db.Collection("folder_mastery")
-	masteryCursor, _ := masteryCollection.Find(ctx, bson.M{"userId": userID})
-	defer masteryCursor.Close(ctx)
-
-	var masteryRecords []models.FolderMastery
-	masteryCursor.All(ctx, &masteryRecords)
-
-	// Build map of folderID to mastery record
-	masteryMap := make(map[string]models.FolderMastery)
-	for _, m := range masteryRecords {
-		masteryMap[m.FolderID] = m
-	}
-
-	// Build response
-	folderMasteryResponses := []FolderMasteryResponse{}
-	for _, folder := range folders {
-		folderID := folder.ID.Hex()
-		if mastery, exists := masteryMap[folderID]; exists {
-			folderMasteryResponses = append(folderMasteryResponses, FolderMasteryResponse{
-				FolderID:       mastery.FolderID,
-				UserID:         mastery.UserID,
-				TotalNotes:     mastery.TotalNotes,
-				MasteredNotes:  mastery.MasteredNotes,
-				LearntNotes:    mastery.LearntNotes,
-				MasteryLevel:   mastery.MasteryLevel,
-				MasteryPercent: mastery.MasteryPercent,
-				LastStudyDate:  mastery.LastStudyDate,
-				CreatedAt:      mastery.CreatedAt,
-				UpdatedAt:      mastery.UpdatedAt,
-			})
-		}
-	}
-
-	response := GetAllFoldersMasteryResponse{
-		Folders: folderMasteryResponses,
-		Total:   len(folderMasteryResponses),
-	}
-
-	c.JSON(200, response)
-}
-
-// UpdateNoteMastery recalculates folder mastery after note review
-// @Summary Updates mastery levels when a user reviews a note (correct or incorrect)
-func UpdateNoteMastery(c *gin.Context) {
-	userID := c.GetString("userId")
-	if userID == "" {
-		c.JSON(400, gin.H{"error": "userId required"})
-		return
-	}
-
-	var req MasteryUpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-
-	// TODO: Implement database update logic
-	// 1. Update NoteReview record
-	// 2. Recalculate FolderMastery based on all reviews
-	// 3. Determine new mastery level:
-	//    - Mastered: >80% of notes mastered
-	//    - Learnt: 50-80% mastery
-	//    - Review Soon: <50% mastery
-
-	c.JSON(200, gin.H{
-		"message":   "Mastery updated",
-		"noteId":    req.NoteID,
-		"isCorrect": req.IsCorrect,
-	})
 }

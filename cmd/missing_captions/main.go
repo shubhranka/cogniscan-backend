@@ -1,5 +1,5 @@
-// main package for the missing captions script
-// This script finds notes without captions and generates captions and embeddings for them
+// main package for missing captions script
+// This script truncates caption_embeddings and regenerates captions/embeddings for all note nodes
 package main
 
 import (
@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"encoding/json"
@@ -19,25 +18,32 @@ import (
 	oaioption "github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/shared"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 )
 
-type Note struct {
-	ID            string `bson:"_id"`
-	Name          string `bson:"name"`
-	PublicURL     string `bson:"publicUrl"`
-	DriveID       string `bson:"driveId"`
-	Caption       string `bson:"caption"`
-	CaptionStatus string `bson:"captionStatus"`
-	CaptionError  string `bson:"captionError"`
-	FolderID      string `bson:"folderId"`
-	OwnerID       string `bson:"ownerId"`
+type NodeType string
+
+const (
+	NodeTypeFolder NodeType = "folder"
+	NodeTypeNote   NodeType = "note"
+)
+
+type NodeMetadata struct {
+	Type    NodeType `bson:"type"`
+	DriveID string   `bson:"driveId,omitempty"`
+}
+
+type Node struct {
+	ID        string       `bson:"_id"`
+	Name      string       `bson:"name"`
+	ParentID  string       `bson:"parentId"`
+	Metadata  NodeMetadata `bson:"metadata"`
+	OwnerID   string       `bson:"ownerId"`
+	PublicURL string       `bson:"publicUrl,omitempty"`
 }
 
 type CaptionEmbedding struct {
@@ -57,7 +63,6 @@ var (
 	driveSrv    *drive.Service
 )
 
-// Use dotenv to load environment variables
 func init() {
 	err := godotenv.Load()
 	if err != nil {
@@ -66,8 +71,8 @@ func init() {
 }
 
 func main() {
-	log.Println("=== Missing Transcriptions Script ===")
-	log.Println("This script will find notes without transcriptions and generate transcriptions + embeddings for them.")
+	log.Println("=== Missing Captions Script ===")
+	log.Println("This script will truncate caption_embeddings and regenerate captions for all note nodes.")
 
 	// Initialize services
 	if err := initServices(); err != nil {
@@ -75,45 +80,55 @@ func main() {
 	}
 	log.Println("All services initialized successfully")
 
-	// query := "('me' in owners or 'me' in writers) and trashed = false"
-
-	// // list all the files/folders of the drive
-	// files, err := driveSrv.Files.List().IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
-	// if err != nil {
-	// 	log.Fatalf("Failed to list files: %v", err)
-	// }
-	// log.Printf("Found %d files", len(files.Files))
-	// for _, file := range files.Files {
-	// 	log.Printf("  - %s (ID: %s)", file.Name, file.Id)
-	// 	if file.OwnedByMe {
-	// 		log.Printf("    Owned by me: true")
-	// 	} else {
-	// 		log.Printf("    Owned by me: false")
-	// 	}
-	// 	if file.Capabilities != nil {
-	// 		log.Printf("    Can Edit: %v", file.Capabilities.CanEdit)
-	// 	} else {
-	// 		log.Printf("    Can Edit: false (no capabilities)")
-	// 	}
-	// }
-
-	// return
-
-	// Find notes without transcriptions
-	notes, err := findNotesWithoutTranscriptions()
-	if err != nil {
-		log.Fatalf("Failed to find notes: %v", err)
+	// Truncate caption_embeddings collection
+	dbName := os.Getenv("DB_NAME")
+	if dbName == "" {
+		dbName = "cogniscan"
 	}
 
-	if len(notes) == 0 {
-		log.Println("No notes found without transcriptions. All notes have transcriptions!")
+	log.Println("\n=== Truncating caption_embeddings collection ===")
+	embeddingsCollection := mongoClient.Database(dbName).Collection("caption_embeddings")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	count, err := embeddingsCollection.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		log.Fatalf("Failed to count caption_embeddings: %v", err)
+	}
+
+	if count > 0 {
+		fmt.Printf("Found %d existing caption embeddings. Delete and regenerate? (y/n): ", count)
+		var confirmation string
+		fmt.Scanln(&confirmation)
+		if confirmation != "y" && confirmation != "Y" {
+			log.Println("Aborted by user")
+			return
+		}
+
+		if err := embeddingsCollection.Drop(ctx); err != nil {
+			log.Fatalf("Failed to drop caption_embeddings collection: %v", err)
+		}
+		log.Printf("Dropped caption_embeddings collection (deleted %d documents)", count)
+	} else {
+		log.Println("caption_embeddings collection is empty")
+	}
+
+	// Find all note nodes
+	log.Println("\n=== Finding all note nodes ===")
+	nodes, err := findAllNoteNodes(ctx, dbName)
+	if err != nil {
+		log.Fatalf("Failed to find note nodes: %v", err)
+	}
+
+	if len(nodes) == 0 {
+		log.Println("No note nodes found!")
 		return
 	}
 
-	log.Printf("Found %d notes without transcriptions\n", len(notes))
+	log.Printf("Found %d note nodes\n", len(nodes))
 
 	// Ask for confirmation
-	fmt.Printf("\nProcess %d notes? (y/n): ", len(notes))
+	fmt.Printf("Process %d note nodes? (y/n): ", len(nodes))
 	var confirmation string
 	fmt.Scanln(&confirmation)
 	if confirmation != "y" && confirmation != "Y" {
@@ -121,49 +136,43 @@ func main() {
 		return
 	}
 
-	// Process each note
+	// Process each note node
 	successCount := 0
 	failureCount := 0
 
-	for i, note := range notes {
-		log.Printf("\n[%d/%d] Processing note: %s (ID: %s)", i+1, len(notes), note.Name, note.ID)
+	for i, node := range nodes {
+		log.Printf("\n[%d/%d] Processing note node: %s (ID: %s)", i+1, len(nodes), node.Name, node.ID)
 
-		if err := processNote(note); err != nil {
-			log.Printf("  ERROR: Failed to process note: %v", err)
+		if err := processNoteNode(node, dbName); err != nil {
+			log.Printf("  ERROR: Failed to process note node: %v", err)
 			failureCount++
 		} else {
-			log.Printf("  SUCCESS: Transcription and embedding generated")
+			log.Printf("  SUCCESS: Caption and embedding generated")
 			successCount++
 		}
 
 		// Small delay between requests to avoid rate limiting
-		if i < len(notes)-1 {
+		if i < len(nodes)-1 {
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
 
 	log.Printf("\n=== Summary ===")
-	log.Printf("Total notes: %d", len(notes))
+	log.Printf("Total note nodes: %d", len(nodes))
 	log.Printf("Successful: %d", successCount)
 	log.Printf("Failed: %d", failureCount)
 }
 
 func initServices() error {
-	// Initialize MongoDB
 	if err := initMongoDB(); err != nil {
 		return fmt.Errorf("MongoDB: %w", err)
 	}
-
-	// Initialize AI Service
 	if err := initAIService(); err != nil {
 		return fmt.Errorf("AI Service: %w", err)
 	}
-
-	// Initialize Drive Service
 	if err := initDriveService(); err != nil {
 		return fmt.Errorf("Drive Service: %w", err)
 	}
-
 	return nil
 }
 
@@ -213,49 +222,12 @@ func initAIService() error {
 
 func initDriveService() error {
 	log.Println("Initializing Drive Service...")
-	ctx := context.Background()
-
 	credentialsJSONString := os.Getenv("COGNI_BACKEND")
 	if credentialsJSONString == "" {
 		return fmt.Errorf("COGNI_BACKEND environment variable not set")
 	}
 
-	config, err := google.ConfigFromJSON([]byte(credentialsJSONString), drive.DriveFileScope)
-	if err != nil {
-		return fmt.Errorf("unable to parse client secret to config: %v", err)
-	}
-
-	// Try to read token from file
-	tokFile := "token.json"
-	tok, err := tokenFromFile(tokFile)
-	if err != nil {
-		// Generate new token
-		log.Println("Generating new token...")
-
-		// drive.DriveMetadataReadonlyScope
-		// drive.DriveReadonlyScope
-		config.Scopes = []string{drive.DriveMetadataReadonlyScope, drive.DriveReadonlyScope, drive.DriveFileScope}
-
-		authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-		fmt.Println("Please visit the following URL to authorize this application:")
-		fmt.Println(authURL)
-		fmt.Println("Required scopes: " + strings.Join(config.Scopes, " "))
-		fmt.Println("After authorization, please enter the authorization code:")
-		var authCode string
-		if _, err := fmt.Scan(&authCode); err != nil {
-			return fmt.Errorf("unable to read authorization code: %v", err)
-		}
-		tok, err = config.Exchange(context.Background(), authCode)
-		if err != nil {
-			return fmt.Errorf("unable to retrieve token from web: %v", err)
-		}
-
-		saveToken(tokFile, tok)
-	}
-
-	client := config.Client(context.Background(), tok)
-
-	srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	srv, err := drive.NewService(context.Background(), option.WithCredentialsFile("service-account.json"))
 	if err != nil {
 		return fmt.Errorf("unable to retrieve Drive client: %v", err)
 	}
@@ -286,47 +258,34 @@ func saveToken(file string, token *oauth2.Token) {
 	json.NewEncoder(f).Encode(token)
 }
 
-// findNotesWithoutTranscriptions finds notes that need transcriptions
-// Criteria: caption is empty OR captionStatus is not "completed"
-func findNotesWithoutTranscriptions() ([]Note, error) {
-	log.Println("Finding notes without transcriptions...")
+func findAllNoteNodes(ctx context.Context, dbName string) ([]Node, error) {
+	nodesCollection := mongoClient.Database(dbName).Collection("nodes")
 
-	dbName := os.Getenv("DB_NAME")
-	if dbName == "" {
-		dbName = "cogniscan"
-	}
-
-	notesCollection := mongoClient.Database(dbName).Collection("notes")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Find notes where caption is empty OR captionStatus is not "completed"
 	filter := bson.M{
-		"$or": []bson.M{
-			{"caption": bson.M{"$exists": false}},
-			{"caption": ""},
-			{"captionStatus": bson.M{"$ne": "completed"}},
-		},
+		"metadata.type": NodeTypeNote,
 	}
 
-	cursor, err := notesCollection.Find(ctx, filter)
+	cursor, err := nodesCollection.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	defer cursor.Close(ctx)
 
-	var notes []Note
-	if err := cursor.All(ctx, &notes); err != nil {
+	var nodes []Node
+	if err := cursor.All(ctx, &nodes); err != nil {
 		return nil, err
 	}
 
-	log.Printf("  Found %d notes without transcriptions", len(notes))
-	return notes, nil
+	return nodes, nil
 }
 
-func processNote(note Note) error {
+func processNoteNode(node Node, dbName string) error {
+	if node.Metadata.DriveID == "" {
+		return fmt.Errorf("note node has no Drive ID")
+	}
+
 	// 1. Download image from Drive
-	resp, err := driveSrv.Files.Get(note.DriveID).Download()
+	resp, err := driveSrv.Files.Get(node.Metadata.DriveID).Download()
 	if err != nil {
 		return fmt.Errorf("failed to download image: %w", err)
 	}
@@ -337,81 +296,46 @@ func processNote(note Note) error {
 		return fmt.Errorf("failed to read image bytes: %w", err)
 	}
 
-	// 2. Generate transcription
-	transcription, err := generateTranscription(imageBytes)
+	// 2. Generate caption
+	caption, err := generateCaption(imageBytes)
 	if err != nil {
-		return fmt.Errorf("failed to generate transcription: %w", err)
+		return fmt.Errorf("failed to generate caption: %w", err)
 	}
 
-	log.Printf("  Generated transcription: %s", transcription)
+	log.Printf("  Generated caption: %s", caption)
 
 	// 3. Generate embedding
-	vector, err := generateEmbedding(transcription)
+	vector, err := generateEmbedding(caption)
 	if err != nil {
 		return fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
 	log.Printf("  Generated embedding (dim: %d)", len(vector))
 
-	// 4. Update note with transcription and status
-	dbName := os.Getenv("DB_NAME")
-	if dbName == "" {
-		dbName = "cogniscan"
-	}
-
-	notesCollection := mongoClient.Database(dbName).Collection("notes")
+	// 4. Store in caption_embeddings collection
+	embeddingsCollection := mongoClient.Database(dbName).Collection("caption_embeddings")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	noteObjID, err := primitiveObjectIDFromHex(note.ID)
-	if err != nil {
-		return fmt.Errorf("invalid note ID: %w", err)
+	embedding := CaptionEmbedding{
+		NoteID:    node.ID,
+		FolderID:  node.ParentID,
+		OwnerID:   node.OwnerID,
+		Caption:   caption,
+		Vector:    vector,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
-	filter := bson.M{"_id": noteObjID}
-	update := bson.M{
-		"$set": bson.M{
-			"caption":       transcription,
-			"captionStatus": "completed",
-			"updatedAt":     time.Now(),
-		},
-		"$unset": bson.M{
-			"captionError": "",
-		},
-	}
-
-	if _, err := notesCollection.UpdateOne(ctx, filter, update); err != nil {
-		return fmt.Errorf("failed to update note: %w", err)
-	}
-
-	// 5. Store embedding in caption_embeddings collection (field names unchanged for compatibility)
-	embeddingsCollection := mongoClient.Database(dbName).Collection("caption_embeddings")
-	embeddingFilter := bson.M{"noteId": note.ID}
-	embeddingUpdate := bson.M{
-		"$set": bson.M{
-			"noteId":    note.ID,
-			"folderId":  note.FolderID,
-			"ownerId":   note.OwnerID,
-			"caption":   transcription,
-			"vector":    vector,
-			"updatedAt": time.Now(),
-		},
-		"$setOnInsert": bson.M{
-			"createdAt": time.Now(),
-		},
-	}
-
-	opts := options.Update().SetUpsert(true)
-	if _, err := embeddingsCollection.UpdateOne(ctx, embeddingFilter, embeddingUpdate, opts); err != nil {
+	if _, err := embeddingsCollection.InsertOne(ctx, embedding); err != nil {
 		return fmt.Errorf("failed to store embedding: %w", err)
 	}
 
 	return nil
 }
 
-func generateTranscription(imageBytes []byte) (string, error) {
+func generateCaption(imageBytes []byte) (string, error) {
 	base64Image := base64.StdEncoding.EncodeToString(imageBytes)
-	// Using adaptive transcription prompt for comprehensive content extraction
 	content := fmt.Sprintf(`<img src="data:image/jpeg;base64,%s">
 
 Transcribe all visible text from this image. Describe any diagrams or tables with their labels. Copy mathematical formulas exactly. Do not use templates or placeholders - provide actual content only.`, base64Image)
@@ -421,9 +345,10 @@ Transcribe all visible text from this image. Describe any diagrams or tables wit
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage(content),
 		},
-		Model:       shared.ChatModel("microsoft/phi-3.5-vision-instruct"),
-		MaxTokens:   openai.Int(2048),   // Increased from 512 for comprehensive content extraction
-		Temperature: openai.Float(0.30), // Balanced for flexibility across different content types
+		// Model:       shared.ChatModel("microsoft/phi-3.5-vision-instruct"),
+		Model:       shared.ChatModel("microsoft/phi-4-multimodal-instruct"),
+		MaxTokens:   openai.Int(2048),
+		Temperature: openai.Float(0.30),
 		TopP:        openai.Float(0.70),
 	})
 
@@ -436,9 +361,6 @@ Transcribe all visible text from this image. Describe any diagrams or tables wit
 	}
 
 	result := completion.Choices[0].Message.Content
-	if len(strings.TrimSpace(result)) == 0 {
-		return "", fmt.Errorf("empty transcription returned - image may contain no text")
-	}
 	return result, nil
 }
 
@@ -467,8 +389,4 @@ func generateEmbedding(text string) ([]float32, error) {
 	}
 
 	return result, nil
-}
-
-func primitiveObjectIDFromHex(s string) (primitive.ObjectID, error) {
-	return primitive.ObjectIDFromHex(s)
 }

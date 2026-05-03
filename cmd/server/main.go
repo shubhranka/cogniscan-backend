@@ -1,4 +1,3 @@
-// ./cogniscan-backend/cmd/server/main.go
 package main
 
 import (
@@ -13,6 +12,7 @@ import (
 	"cogniscan/backend/internal/database"
 	"cogniscan/backend/internal/handlers"
 	"cogniscan/backend/internal/middleware"
+	"cogniscan/backend/internal/queue"
 	"cogniscan/backend/internal/services"
 	"cogniscan/backend/internal/workers"
 
@@ -84,6 +84,19 @@ func main() {
 		// Continue without queue service - caption generation will be disabled
 	}
 
+	// Initialize Mastery Queue for background mastery propagation
+	masteryWorkerCount := 2
+	if mwc := os.Getenv("MASTERY_WORKER_COUNT"); mwc != "" {
+		if n, err := strconv.Atoi(mwc); err == nil && n > 0 {
+			masteryWorkerCount = n
+		}
+	}
+	masteryQueue := queue.NewMasteryQueue(masteryWorkerCount, nil)
+	services.SetMasteryQueue(masteryQueue)
+	masteryQueue.Start()
+
+	log.Printf("[Main] Mastery queue started with %d workers", masteryWorkerCount)
+
 	// Initialize Firebase Admin SDK from Environment Variable
 	mainCtx := context.Background()
 	keyDataString := os.Getenv("KEY_DATA")
@@ -146,7 +159,12 @@ func main() {
 			protected.POST("/progress/study-session", handlers.RecordStudySession)
 			protected.GET("/storage/:userId", handlers.GetStorageUsage)
 
-			// MASTERY ROUTES
+			// MASTERY ROUTES (updated for nodes)
+			protected.GET("/mastery/nodes/:nodeId", handlers.GetNodeMastery)
+			protected.GET("/mastery/nodes", handlers.GetAllNodesMastery)
+			protected.PUT("/mastery/nodes/:nodeId/refresh", handlers.RefreshNodeMastery)
+			protected.GET("/mastery/stats", handlers.GetMasteryStats)
+			// Legacy folder routes - deprecated but kept for compatibility
 			protected.GET("/mastery/folders/:folderId", handlers.GetFolderMastery)
 			protected.GET("/mastery/folders", handlers.GetAllFoldersMastery)
 			protected.PUT("/mastery/notes/:noteId", handlers.UpdateNoteMastery)
@@ -166,22 +184,18 @@ func main() {
 			// SEARCH ROUTES
 			protected.GET("/search", handlers.SearchItems)
 
-			// FOLDER ROUTES
-			protected.POST("/folders", handlers.CreateFolder)
-			protected.GET("/folders/:folderId", handlers.GetFolders)
-			protected.PUT("/folders/:id", handlers.UpdateFolder)
-			protected.DELETE("/folders/:id", handlers.DeleteFolder)
-
-			// NOTE ROUTES
-			protected.POST("/notes", handlers.CreateNote)
-			protected.GET("/folders/:folderId/notes", handlers.GetNotesInFolder)
-			protected.PUT("/notes/:id", handlers.UpdateNote)
-			protected.DELETE("/notes/:id", handlers.DeleteNote)
-			protected.GET("/notes/:id/image", handlers.GetNoteImage)
-			protected.PUT("/notes/:id/caption", handlers.RegenerateCaption)
-			// The /notes/:id/image route has been removed as it's no longer needed
-			protected.GET("/notes/name-suggestions/:id", handlers.GetNameSuggestionsForNote)
-			protected.GET("/folders/name-suggestions/:id", handlers.GetNameSuggestionsForFolder)
+			// NODE ROUTES
+			protected.POST("/nodes", handlers.CreateNode)
+			protected.GET("/nodes/:id", handlers.GetNode)
+			protected.GET("/nodes", handlers.GetNodeChildren)
+			protected.PUT("/nodes/:id", handlers.UpdateNode)
+			protected.DELETE("/nodes/:id", handlers.DeleteNode)
+			protected.GET("/nodes/tree/:id", handlers.GetNodeTree)
+			protected.POST("/nodes/notes", handlers.CreateNoteNode)
+			protected.GET("/nodes/:id/image", handlers.GetNodeImage)
+			protected.PUT("/nodes/:id/caption", handlers.RegenerateNodeCaption)
+			protected.POST("/nodes/:id/review", handlers.ReviewNoteNode)
+			protected.GET("/nodes/:id/name-suggestions", handlers.GetNameSuggestionsForFolder)
 
 			// QUIZ ROUTES
 			protected.POST("/quizzes/folders/:folderId", handlers.CreateQuiz)
@@ -204,6 +218,10 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// Defer cleanup for background queues
+	defer masteryQueue.Stop()
+
 	log.Printf("Server starting on port %s", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
